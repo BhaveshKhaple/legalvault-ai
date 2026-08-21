@@ -6,7 +6,7 @@ An on-premise, evidence-first document assistant for Indian legal and BFSI teams
 
 Runs offline. No cloud APIs. Data never leaves the client machine.
 
-Built by **Team Pied Piper** as a final-year major project for DIPEX 2025.
+Built by **Team Pied Piper** as a final-year major project.
 
 ---
 
@@ -15,7 +15,7 @@ Built by **Team Pied Piper** as a final-year major project for DIPEX 2025.
 This is an active WIP rewrite. The prior prototype (Streamlit + Gemini + FAISS) lives at [Multimodal-SIH](https://github.com/BhaveshKhaple/Multimodal-SIH). This repo is the ground-up v2 build.
 
 - Bootstrap phase: in progress
-- Target: working demo by DIPEX 2025
+- Target: working demo before final-year submission
 - See `PRD.md` for full product scope and `TRD.md` for architecture
 
 ## What it does
@@ -141,11 +141,11 @@ Read `RULES.md` before writing any code, especially if you plan to use AI assist
 - `TRD.md` — Technical Requirements Document (architecture, schema, APIs, security)
 - `RULES.md` — Team development rules and AI coding guardrails
 - `Major project Tracker.xlsx` — Sprint tracker (source of truth for task state)
-- Pitch deck — DIPEX 2025 narrative (in shared Drive)
+- Pitch deck — project narrative (in shared Drive)
 
 ## Contributing
 
-Only current team members contribute in v1. External contributions are welcome after DIPEX. See `CONTRIBUTING.md` (ships with Task 0.3).
+Only current team members contribute in v1. External contributions are welcome after the final submission. See `CONTRIBUTING.md` (ships with Task 0.3).
 
 ## License
 

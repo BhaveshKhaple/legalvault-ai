@@ -369,7 +369,7 @@ Loaded once at startup. No hot-swap during a running instance.
 - **Integration tests:** `tests/integration/` spin up postgres + redis in Docker, run against real DBs. Cover happy-path ingestion, query, Report Shield.
 - **E2E smoke:** `tests/e2e/` runs a scripted flow: upload → poll → query → shield → export. Runs on merge to `main`.
 - **Eval:** `tests/eval/` runs Recall@K on annotated corpus. Not gating for PRs but flagged if regression >5%.
-- **Manual QA:** Bhavesh runs a manual demo pass before every DIPEX-milestone merge.
+- **Manual QA:** Bhavesh runs a manual demo pass before every milestone merge.
 
 ## 15. Observability
 

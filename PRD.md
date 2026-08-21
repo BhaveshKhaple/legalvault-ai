@@ -11,7 +11,7 @@ LegalVault AI is an on-premise, evidence-first document assistant for Indian leg
 **One-line pitch:** "Google Search for your legal documents, with cited proof and a report audit shield."
 
 **Team:** Bhavesh Khaple (lead), Shubham, Vijay, Tejas Bagal.
-**Delivery target:** DIPEX 2025 demo, then paid pilots.
+**Delivery target:** Major project submission, then paid pilots.
 **Hard constraint:** Runs offline. No cloud APIs. Client data never leaves the machine.
 
 ---
@@ -71,7 +71,7 @@ Priority: **P0** = launch blocker, **P1** = important, **P2** = deferrable.
 - **Latency:** End-to-end query response under 3 seconds on the CPU tier.
 - **Report Shield precision:** At least 80% of flags catch real gaps or contradictions when tested against known-flaw sample reports.
 - **Offline verification:** Zero external network calls during a full demo run (measured with tcpdump).
-- **Adoption:** 3 paying pilot firms within 6 months of DIPEX submission.
+- **Adoption:** 3 paying pilot firms within 6 months of major project submission.
 - **Time saved:** Pilot users report 70% reduction in evidence-retrieval time compared to their prior workflow (self-reported, tracked monthly).
 
 ## 7. Non-goals
@@ -98,7 +98,7 @@ ROI story: Professional at ₹8,000/month for 5 lawyers works out to ₹1,600 pe
 
 ## 9. Roadmap
 
-- **Now:** DIPEX 2025 demo, validate Report Shield with domain experts.
+- **Now:** Bootstrap phase. Validate Report Shield with domain experts.
 - **Month 1–2:** Report Shield v1 with clause library for Indian contracts. First feature no competitor has.
 - **Month 2–4:** Free 4-week pilots with 2–3 firms. Measure real time saved. Refine chunking on Indian legal docs.
 - **Month 4–6:** Convert pilots to paid. Professional plan becomes primary pitch.
@@ -116,7 +116,7 @@ ROI story: Professional at ₹8,000/month for 5 lawyers works out to ₹1,600 pe
 
 - **Legal privilege:** Documents are subject to attorney-client privilege. No third-party network access allowed at query time.
 - **Regulatory:** SEBI Data Protection Circular, RBI IT Framework for NBFCs. Data residency is on-prem.
-- **Team size:** 4 people, part-time (college major project). Ten-week build window before DIPEX. No paid infrastructure.
+- **Team size:** 4 people, part-time (college major project). Ten-week build window before submission. No paid infrastructure.
 - **Hardware baseline:** Must run on 8GB RAM Windows/Linux laptops without a GPU (Tier 2).
 
 ## 12. Open questions
@@ -131,4 +131,4 @@ ROI story: Professional at ₹8,000/month for 5 lawyers works out to ₹1,600 pe
 - `TRD.md` — Technical Requirements Document (architecture, schema, APIs).
 - `RULES.md` — Team development rules and AI coding guardrails.
 - `Major project Tracker.xlsx` — Sprint-level task tracker (Google Sheets).
-- Pitch deck (DIPEX 2025) — Product narrative and visual system.
+- Pitch deck — Product narrative and visual system.
