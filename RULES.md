@@ -11,7 +11,7 @@ The rules here are not style suggestions. Break them and code gets sent back, no
 ## 1. Before you code
 
 ### 1.1 Understand the task
-Open `LegalVault_Tracker.xlsx` and read your task's row. All of it:
+Open `Major project Tracker.xlsx` and read your task's row. All of it:
 - Task description
 - Acceptance criteria (this is the definition of Done)
 - Depends On
@@ -301,4 +301,4 @@ For all of these, you may prompt the AI to critique your code once you have writ
 - `PRD.md` — product requirements
 - `TRD.md` — technical requirements
 - `README.md` — quick start and orientation
-- `LegalVault_Tracker.xlsx` — sprint tracker (source of truth for task state)
+- `Major project Tracker.xlsx` — sprint tracker (source of truth for task state)

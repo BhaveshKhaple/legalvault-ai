@@ -130,5 +130,5 @@ ROI story: Professional at ₹8,000/month for 5 lawyers works out to ₹1,600 pe
 
 - `TRD.md` — Technical Requirements Document (architecture, schema, APIs).
 - `RULES.md` — Team development rules and AI coding guardrails.
-- `LegalVault_Tracker.xlsx` — Sprint-level task tracker (Google Sheets).
+- `Major project Tracker.xlsx` — Sprint-level task tracker (Google Sheets).
 - Pitch deck (DIPEX 2025) — Product narrative and visual system.

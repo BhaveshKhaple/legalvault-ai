@@ -111,7 +111,7 @@ Sequential, fork-based. One task in flight at a time across the whole team. Rule
 The short version:
 
 ```
-1. Pick a Ready task from LegalVault_Tracker.xlsx.
+1. Pick a Ready task from Major project Tracker.xlsx.
 2. Set Status = In Progress. Set Owner = you.
 3. Fork this repo. Clone your fork.
 4. Branch: feature/<module>-<task-id>  e.g. feature/ingestion-1.2
@@ -140,7 +140,7 @@ Read `RULES.md` before writing any code, especially if you plan to use AI assist
 - `PRD.md` — Product Requirements Document (what we are building, for whom, and why)
 - `TRD.md` — Technical Requirements Document (architecture, schema, APIs, security)
 - `RULES.md` — Team development rules and AI coding guardrails
-- `LegalVault_Tracker.xlsx` — Sprint tracker (source of truth for task state)
+- `Major project Tracker.xlsx` — Sprint tracker (source of truth for task state)
 - Pitch deck — DIPEX 2025 narrative (in shared Drive)
 
 ## Contributing

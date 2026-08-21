@@ -392,5 +392,5 @@ Loaded once at startup. No hot-swap during a running instance.
 
 - `PRD.md` — Product Requirements Document.
 - `RULES.md` — Team development rules, AI coding guardrails, security do-nots.
-- `LegalVault_Tracker.xlsx` — Sprint task tracker.
+- `Major project Tracker.xlsx` — Sprint task tracker.
 - OpenAPI spec — auto-generated at `/docs` in a running instance.
