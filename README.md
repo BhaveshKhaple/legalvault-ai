@@ -102,7 +102,7 @@ uvicorn app:app --reload --port 8000
 open http://localhost:8000
 ```
 
-Full setup lives in `docs/setup.md` (after Task 0.1 ships).
+Full setup notes ship per-task in each PR. Architecture overview: [`docs/architecture.md`](docs/architecture.md). API contract: [`docs/api_contract.md`](docs/api_contract.md).
 
 ## Development workflow
 
@@ -137,15 +137,17 @@ Read `RULES.md` before writing any code, especially if you plan to use AI assist
 
 ## Documentation
 
-- `PRD.md` — Product Requirements Document (what we are building, for whom, and why)
-- `TRD.md` — Technical Requirements Document (architecture, schema, APIs, security)
-- `RULES.md` — Team development rules and AI coding guardrails
-- `Major project Tracker.xlsx` — Sprint tracker (source of truth for task state)
+- [`docs/PRD.md`](docs/PRD.md) — Product Requirements Document (what we are building, for whom, and why)
+- [`docs/TRD.md`](docs/TRD.md) — Technical Requirements Document (architecture, schema, APIs, security)
+- [`docs/RULES.md`](docs/RULES.md) — Team development rules and AI coding guardrails
+- [`docs/architecture.md`](docs/architecture.md) — Runtime topology + request lifecycles
+- [`docs/api_contract.md`](docs/api_contract.md) — OpenAPI 3.1 skeleton
+- [`docs/tracker.md`](docs/tracker.md) — Link to the live Google Sheet tracker
 - Pitch deck — project narrative (in shared Drive)
 
 ## Contributing
 
-Only current team members contribute in v1. External contributions are welcome after the final submission. See `CONTRIBUTING.md` (ships with Task 0.3).
+Only current team members contribute in v1. External contributions are welcome after the final submission. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the fork → PR → v1 flow.
 
 ## License
 
