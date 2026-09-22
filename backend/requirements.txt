@@ -22,9 +22,11 @@ httpx>=0.27,<0.28                    # test client + async HTTP
 # Additional deps are added per-task:
 # 1.1  PDF extractor        → pymupdf                        ← DONE
 pymupdf>=1.28,<2.0
-# 1.2  Clause chunker       → (stdlib only)
+# 1.2  Clause chunker       → (stdlib only)                   ← DONE
 # 1.3  Whisper              → openai-whisper, ffmpeg (system) ← DONE
 openai-whisper>=20240930
+# 1.4  Table extraction     → pdfplumber                      ← DONE
+pdfplumber>=0.11,<0.12
 # 1.4  Table extraction     → pdfplumber
 # 2.1  BGE-M3 embeddings    → sentence-transformers, torch
 # 2.2  Qdrant               → qdrant-client
