@@ -1,0 +1,8 @@
+poppler-utils
+openai 
+chromadb 
+pdf2image 
+pillow 
+requests
+google-genai
+ollama
