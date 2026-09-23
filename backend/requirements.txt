@@ -28,9 +28,11 @@ openai-whisper>=20240930
 # 1.4  Table extraction     → pdfplumber                      ← DONE
 pdfplumber>=0.11,<0.12
 # 1.4  Table extraction     → pdfplumber
-# 2.1  BGE-M3 embeddings    → sentence-transformers, torch
+# 2.1  BGE-M3 embeddings    → sentence-transformers, torch          ← DONE
+sentence-transformers>=3.3,<4.0
 # 2.2  Qdrant               → qdrant-client
-# 3.1  BM25                 → rank-bm25
+# 3.1  BM25                 → rank-bm25                            ← DONE
+rank-bm25>=0.2,<0.3
 # 3.3  Cross-encoder rerank → sentence-transformers
 # 4.1  Ollama wrapper       → requests
 # 6.1  Postgres + SQLModel  → sqlmodel, alembic, psycopg2-binary
