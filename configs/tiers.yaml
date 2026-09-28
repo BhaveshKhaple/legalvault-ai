@@ -1,0 +1,26 @@
+# LegalVault AI — Tiered model configuration
+# Loaded ONCE at startup. No hot-swap during a running instance.
+# Switch tier by changing MODEL_TIER in .env and restarting.
+#
+# See docs/TRD.md §11 for rationale.
+
+tier_1:
+  # GPU workstation — highest quality
+  description: "GPU workstation (≥8GB VRAM)"
+  embedding: "BAAI/bge-m3"
+  llm: "qwen3-30b-a3b-instruct-q4"     # 30B MoE, 262K context via Ollama
+  vector_store: "qdrant"
+
+tier_2:
+  # Office laptop — default
+  description: "Office laptop (8GB RAM, no GPU)"
+  embedding: "intfloat/e5-small-v2"
+  llm: "phi4-q4"                         # 14B Q4, ~8GB RAM via Ollama
+  vector_store: "qdrant"
+
+tier_3:
+  # Low-RAM device
+  description: "Low-RAM device (<8GB RAM)"
+  embedding: "google/embedding-gecko-001"
+  llm: "llama3.2-3b-instruct-q4"        # 3B Q4, fits <8GB RAM via Ollama
+  vector_store: "pgvector"               # Qdrant too heavy on Tier 3
