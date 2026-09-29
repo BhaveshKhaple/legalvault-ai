@@ -28,10 +28,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Tier config (Task 4.2 will add model_selector.py that drives this).
-# Hardcoded default here; override via MODEL_NAME env var if needed.
+# Default model — callers in the retrieval pipeline should pass
+# get_model().embedding explicitly to stay in sync with the active tier.
 _DEFAULT_MODEL = "BAAI/bge-m3"
-_EXPECTED_DIM = 1024
 
 # Module-level singleton — keyed by model name so switching models
 # in tests doesn't pollute the cache.

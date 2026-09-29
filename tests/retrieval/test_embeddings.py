@@ -4,21 +4,24 @@ Tests for Task 2.1 — embeddings.embed() and embed_batch().
 SentenceTransformer model loading (~5–15s, ~500MB download) is mocked so
 the suite runs in CI without network access or GPU.
 
-The mock returns vectors of the correct dimension (1024) using numpy zeros/ones
-so downstream shape checks are realistic.
+The mock returns vectors of the correct dimension (_MOCK_DIM) using numpy zeros
+so downstream shape checks are realistic. The actual output dimension depends on
+the active tier's embedding model; _MOCK_DIM is the value used only by the mock.
 """
 
 import logging
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from backend.app.retrieval.embeddings import embed, embed_batch, _EXPECTED_DIM
+from backend.app.retrieval.embeddings import embed, embed_batch
+
+_MOCK_DIM = 1024  # dimension produced by the fake model in these tests
 
 # ─── shared mock setup ───────────────────────────────────────────────────────
 
 
-def _make_fake_model(n_dims: int = _EXPECTED_DIM):
+def _make_fake_model(n_dims: int = _MOCK_DIM):
     """Return a mock SentenceTransformer whose encode() returns plausible arrays."""
     import numpy as np
 
@@ -54,7 +57,7 @@ class TestEmbed:
 
     def test_correct_dimension(self):
         result = embed("any text")
-        assert len(result) == _EXPECTED_DIM
+        assert len(result) == _MOCK_DIM
 
     def test_elements_are_floats(self):
         result = embed("test")
@@ -63,12 +66,12 @@ class TestEmbed:
     def test_empty_string_accepted(self):
         # Edge case: model should still return a vector
         result = embed("")
-        assert len(result) == _EXPECTED_DIM
+        assert len(result) == _MOCK_DIM
 
     def test_long_text_accepted(self):
         long_text = "contract term " * 500
         result = embed(long_text)
-        assert len(result) == _EXPECTED_DIM
+        assert len(result) == _MOCK_DIM
 
     def test_latency_logged(self, caplog):
         with caplog.at_level(logging.DEBUG, logger="backend.app.retrieval.embeddings"):
@@ -94,7 +97,7 @@ class TestEmbedBatch:
     def test_each_vector_correct_dim(self):
         result = embed_batch(["x", "y"])
         for vec in result:
-            assert len(vec) == _EXPECTED_DIM
+            assert len(vec) == _MOCK_DIM
 
     def test_empty_list_returns_empty(self):
         result = embed_batch([])
@@ -103,7 +106,7 @@ class TestEmbedBatch:
     def test_single_item_batch(self):
         result = embed_batch(["only one"])
         assert len(result) == 1
-        assert len(result[0]) == _EXPECTED_DIM
+        assert len(result[0]) == _MOCK_DIM
 
     def test_large_batch_accepted(self):
         texts = [f"chunk {i}" for i in range(200)]
@@ -121,4 +124,4 @@ class TestEmbedBatch:
         texts = ["alpha", "beta", "gamma"]
         result = embed_batch(texts)
         # We can't check semantic order with mocks, but length and dim must align
-        assert [len(v) for v in result] == [_EXPECTED_DIM] * len(texts)
+        assert [len(v) for v in result] == [_MOCK_DIM] * len(texts)

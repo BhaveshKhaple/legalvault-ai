@@ -39,6 +39,7 @@ class TestGetModel:
         assert isinstance(cfg.llm, str) and cfg.llm
         assert cfg.vector_store in ("qdrant", "pgvector")
         assert isinstance(cfg.description, str) and cfg.description
+        assert isinstance(cfg.embedding_dim, int) and cfg.embedding_dim > 0
 
     def test_tier1_uses_qdrant(self, monkeypatch):
         monkeypatch.setenv("MODEL_TIER", "1")
@@ -60,9 +61,9 @@ class TestGetModel:
         with pytest.raises(ValueError, match="not valid"):
             get_model()
 
-    def test_non_numeric_tier_raises_value_error(self, monkeypatch):
+    def test_unknown_string_tier_raises_value_error(self, monkeypatch):
         monkeypatch.setenv("MODEL_TIER", "two")
-        with pytest.raises(ValueError, match="integer"):
+        with pytest.raises(ValueError, match="not valid"):
             get_model()
 
     def test_config_is_frozen(self, monkeypatch):
@@ -70,3 +71,32 @@ class TestGetModel:
         cfg = get_model()
         with pytest.raises(Exception):  # dataclass frozen=True raises FrozenInstanceError
             cfg.llm = "hacked"
+
+    # ─── tier_bhavesh tests ──────────────────────────────────────────────────
+
+    def test_bhavesh_tier_returns_config(self, monkeypatch):
+        monkeypatch.setenv("MODEL_TIER", "bhavesh")
+        cfg = get_model()
+        assert cfg.tier == "bhavesh"
+
+    def test_bhavesh_tier_uses_phi3_mini(self, monkeypatch):
+        monkeypatch.setenv("MODEL_TIER", "bhavesh")
+        assert get_model().llm == "phi3:mini"
+
+    def test_bhavesh_tier_uses_e5_small(self, monkeypatch):
+        monkeypatch.setenv("MODEL_TIER", "bhavesh")
+        assert get_model().embedding == "intfloat/e5-small-v2"
+
+    def test_bhavesh_tier_embedding_dim_is_384(self, monkeypatch):
+        monkeypatch.setenv("MODEL_TIER", "bhavesh")
+        assert get_model().embedding_dim == 384
+
+    def test_bhavesh_tier_uses_qdrant(self, monkeypatch):
+        monkeypatch.setenv("MODEL_TIER", "bhavesh")
+        assert get_model().vector_store == "qdrant"
+
+    def test_numeric_tier_embedding_dims(self, monkeypatch):
+        expected = {"1": 1024, "2": 384, "3": 768}
+        for tier_val, dim in expected.items():
+            monkeypatch.setenv("MODEL_TIER", tier_val)
+            assert get_model().embedding_dim == dim, f"tier {tier_val} wrong dim"

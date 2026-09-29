@@ -8,6 +8,7 @@ tier_1:
   # GPU workstation — highest quality
   description: "GPU workstation (≥8GB VRAM)"
   embedding: "BAAI/bge-m3"
+  embedding_dim: 1024
   llm: "qwen3-30b-a3b-instruct-q4"     # 30B MoE, 262K context via Ollama
   vector_store: "qdrant"
 
@@ -15,6 +16,7 @@ tier_2:
   # Office laptop — default
   description: "Office laptop (8GB RAM, no GPU)"
   embedding: "intfloat/e5-small-v2"
+  embedding_dim: 384
   llm: "phi4-q4"                         # 14B Q4, ~8GB RAM via Ollama
   vector_store: "qdrant"
 
@@ -22,5 +24,14 @@ tier_3:
   # Low-RAM device
   description: "Low-RAM device (<8GB RAM)"
   embedding: "google/embedding-gecko-001"
+  embedding_dim: 768
   llm: "llama3.2-3b-instruct-q4"        # 3B Q4, fits <8GB RAM via Ollama
   vector_store: "pgvector"               # Qdrant too heavy on Tier 3
+
+tier_bhavesh:
+  # Bhavesh's Legion laptop: i5-10300H, 8GB RAM, GTX 1650 4GB VRAM
+  description: "Bhavesh laptop (8GB RAM, GTX 1650 4GB)"
+  embedding: "intfloat/e5-small-v2"
+  embedding_dim: 384
+  llm: "phi3:mini"                       # 3.8B Q4 ~2.3GB — fits 8GB RAM via Ollama
+  vector_store: "qdrant"
