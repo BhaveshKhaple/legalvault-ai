@@ -21,10 +21,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from backend.app.llm.model_selector import get_model
+
 logger = logging.getLogger(__name__)
 
 _COLLECTION = "legalvault_chunks"
-_VECTOR_SIZE = 1024
 
 # Module-level singleton — one client for the process lifetime.
 _client: Any = None
@@ -48,13 +49,14 @@ def _ensure_collection(client: Any) -> None:
     """Create the collection if it doesn't exist yet."""
     from qdrant_client.models import Distance, VectorParams  # noqa: PLC0415
 
+    vector_size = get_model().embedding_dim
     existing = {c.name for c in client.get_collections().collections}
     if _COLLECTION not in existing:
         client.create_collection(
             collection_name=_COLLECTION,
-            vectors_config=VectorParams(size=_VECTOR_SIZE, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
         )
-        logger.info("Created Qdrant collection '%s' (dim=%d).", _COLLECTION, _VECTOR_SIZE)
+        logger.info("Created Qdrant collection '%s' (dim=%d).", _COLLECTION, vector_size)
     else:
         logger.debug("Qdrant collection '%s' already exists.", _COLLECTION)
 
