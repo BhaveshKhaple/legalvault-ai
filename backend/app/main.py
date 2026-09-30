@@ -7,8 +7,13 @@ Browse:    http://localhost:8000/         (UI)
 Swagger:   http://localhost:8000/docs
 """
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Load .env BEFORE importing any app module that reads env vars at import time
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parents[2] / "backend" / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,10 +23,37 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.database import create_db_and_tables
 from backend.app.routers import auth, cases, documents, query, shield
 
+logger = logging.getLogger(__name__)
+
+
+async def _recover_stuck_documents():
+    """Reset documents stuck in 'indexing' to 'error' on startup.
+
+    If the server was killed mid-ingestion, documents remain in 'indexing'
+    state forever. On next startup, mark them as 'error' so the user can
+    re-upload instead of waiting for a status that will never change.
+    """
+    from backend.app.database import AsyncSessionLocal
+    from backend.app.models import Document, IngestStatus
+    from sqlmodel import select
+
+    async with AsyncSessionLocal() as session:
+        result = await session.exec(
+            select(Document).where(Document.status == IngestStatus.indexing)
+        )
+        stuck = result.all()
+        if stuck:
+            logger.warning("Recovering %d document(s) stuck in 'indexing' state.", len(stuck))
+            for doc in stuck:
+                doc.status = IngestStatus.error
+                doc.error_message = "Server restarted during ingestion — please re-upload."
+            await session.commit()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_db_and_tables()
+    await _recover_stuck_documents()
     yield
 
 

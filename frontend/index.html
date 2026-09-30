@@ -84,8 +84,11 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 
 /* ══════════════════════════════════════════════════════════════
    LOGIN SCREEN
+   FIX: display:flex was on the ID rule (#screen-login) which has higher
+   specificity than .screen { display:none }, so login never hid.
+   Moved flex centering into .login-center wrapper inside the screen div.
 ══════════════════════════════════════════════════════════════ */
-#screen-login { min-height: 100vh; display: flex; align-items: center;
+.login-center { min-height: 100vh; display: flex; align-items: center;
   justify-content: center; background: var(--paper); }
 .login-box { width: 360px; }
 .login-logo { text-align: center; margin-bottom: 32px; }
@@ -284,6 +287,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
      LOGIN SCREEN
 ═══════════════════════════════════════════════════════ -->
 <div id="screen-login" class="screen active">
+<div class="login-center">
   <div class="login-box">
     <div class="login-logo">
       <div class="brand-mark">
@@ -308,6 +312,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
     </div>
     <div class="login-footer" style="margin-top:12px;">Forgot password? Contact your administrator</div>
   </div>
+</div><!-- end login-center -->
 </div>
 
 <!-- ═══════════════════════════════════════════════════════
@@ -544,12 +549,34 @@ async function loadCases() {
         <td><span class="pill pill-doc">${esc(c.doc_type)}</span></td>
         <td class="mono" style="font-size:13px;">${c.document_count}</td>
         <td style="font-size:13px;color:var(--ink-3);font-family:'IBM Plex Mono',monospace;">${fmtDate(c.created_at)}</td>
-        <td><button class="btn btn-secondary btn-sm" onclick="openCase('${c.case_id}','${esc(c.name)}','${esc(c.doc_type)}')">Open</button></td>
+        <td style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm js-open-case"
+            data-id="${c.case_id}" data-name="${esc(c.name)}" data-type="${esc(c.doc_type)}">Open</button>
+          <button class="btn btn-ghost btn-sm js-del-case" data-id="${c.case_id}"
+            style="color:var(--red);">Delete</button>
+        </td>
       </tr>`).join('');
+
+    // Attach events using data attributes — avoids inline onclick string escaping bugs
+    body.querySelectorAll('.js-open-case').forEach(btn => {
+      btn.addEventListener('click', () => openCase(btn.dataset.id, btn.dataset.name, btn.dataset.type));
+    });
+    body.querySelectorAll('.js-del-case').forEach(btn => {
+      btn.addEventListener('click', () => deleteCase(btn.dataset.id));
+    });
   } catch(e) { toast('Could not load cases: ' + e.message, 'err'); }
 }
 
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+async function deleteCase(caseId) {
+  if (!confirm('Delete this case and all its documents? This cannot be undone.')) return;
+  try {
+    await api('DELETE', `/v1/cases/${caseId}`);
+    toast('Case deleted');
+    loadCases();
+  } catch(e) { toast('Delete failed: ' + e.message, 'err'); }
+}
 
 /* ── New case modal ─────────────────────────────────────────────────────── */
 function openNewCase() { document.getElementById('new-case-modal').classList.add('open'); }
@@ -607,8 +634,14 @@ function handleQueryKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDe
 async function runQuery() {
   const q = document.getElementById('query-input').value.trim();
   if (!q) return;
+  const sendBtn = document.querySelector('.query-send-btn');
+  sendBtn.disabled = true;
   document.getElementById('query-loading').classList.add('active');
   document.getElementById('export-btn').disabled = true;
+  document.getElementById('query-result').innerHTML = `<div class="empty-state">
+    <div class="empty-icon">⏳</div>
+    <div class="empty-title">Searching documents…</div>
+    <div class="empty-desc">Embedding query · retrieving evidence · generating answer</div></div>`;
 
   try {
     const res = await api('POST', `/v1/cases/${currentCaseId}/query`, { question: q });
@@ -621,6 +654,7 @@ async function runQuery() {
       <div class="empty-desc">${esc(e.message)}</div></div>`;
   } finally {
     document.getElementById('query-loading').classList.remove('active');
+    sendBtn.disabled = false;
   }
 }
 
@@ -665,14 +699,36 @@ function renderDocList() {
     return;
   }
   el.innerHTML = currentDocs.map(d => `
-    <li class="doc-item">
+    <li class="doc-item" data-doc-id="${d.document_id}">
       <div class="doc-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg></div>
       <div class="doc-info">
         <div class="doc-name">${esc(d.filename)}</div>
-        <div class="doc-meta-line">${d.page_count ? d.page_count + ' pages · ' : ''}${d.doc_type} · ${fmtDate(d.created_at)}</div>
+        <div class="doc-meta-line">${d.page_count ? d.page_count + ' pages · ' : ''}${d.doc_type} · ${fmtDate(d.created_at)}
+        ${d.status === 'error' ? ' · <span style="color:var(--red)">Failed — re-upload</span>' : ''}
+        </div>
       </div>
       <span class="status-badge status-${d.status}">${d.status}</span>
+      <button class="btn btn-ghost btn-sm js-del-doc" data-doc-id="${d.document_id}"
+        style="color:var(--red);margin-left:4px;" title="Delete document">✕</button>
     </li>`).join('');
+
+  // Attach delete handlers
+  el.querySelectorAll('.js-del-doc').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteDocument(btn.dataset.docId);
+    });
+  });
+}
+
+async function deleteDocument(docId) {
+  if (!confirm('Delete this document and its indexed chunks?')) return;
+  try {
+    await api('DELETE', `/v1/cases/${currentCaseId}/documents/${docId}`);
+    toast('Document deleted');
+    loadDocs();
+    refreshShieldDocList();
+  } catch(e) { toast('Delete failed: ' + e.message, 'err'); }
 }
 
 function handleDrop(e) {
@@ -684,18 +740,47 @@ function handleDrop(e) {
 function handleFileSelect(e) { uploadFiles(Array.from(e.target.files)); }
 
 async function uploadFiles(files) {
+  const zone = document.getElementById('upload-zone');
+  const fileInput = document.getElementById('file-input');
+  zone.classList.add('uploading');
+  zone.style.pointerEvents = 'none';
+  zone.style.opacity = '0.6';
+  fileInput.disabled = true;
+
   for (const f of files) {
     const fd = new FormData();
     fd.append('file', f);
-    toast(`Uploading ${f.name}…`);
+    // Show in-progress placeholder immediately
+    const tempId = 'tmp-' + Date.now();
+    const listEl = document.getElementById('doc-list');
+    const existingEmpty = listEl.querySelector('li[style]');
+    if (existingEmpty) existingEmpty.remove();
+    const tmpLi = document.createElement('li');
+    tmpLi.className = 'doc-item'; tmpLi.id = tempId;
+    tmpLi.innerHTML = `<div class="doc-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg></div>
+      <div class="doc-info"><div class="doc-name">${esc(f.name)}</div>
+      <div class="doc-meta-line">Indexing — this may take up to 30s for large files…</div>
+      <div class="progress-wrap"><div class="progress-bar" style="width:40%;animation:loadslide 1.4s ease-in-out infinite"></div></div></div>
+      <span class="status-badge status-indexing">indexing</span>`;
+    listEl.prepend(tmpLi);
+
     try {
       const r = await fetch(`${API}/v1/cases/${currentCaseId}/documents`, { method: 'POST', body: fd });
       const data = await r.json();
+      document.getElementById(tempId)?.remove();
       if (!r.ok) throw new Error(data.detail || r.statusText);
-      toast(`${f.name} indexed — ${data.chunk_count} chunks`);
-      loadDocs();
-    } catch(e) { toast(`${f.name}: ${e.message}`, 'err'); }
+      toast(`${f.name} — ${data.chunk_count} chunks indexed`);
+    } catch(e) {
+      document.getElementById(tempId)?.remove();
+      toast(`${f.name}: ${e.message}`, 'err');
+    }
+    loadDocs();
   }
+
+  zone.style.pointerEvents = '';
+  zone.style.opacity = '';
+  fileInput.disabled = false;
+  fileInput.value = ''; // reset so same file can be re-uploaded
 }
 
 /* ── Shield tab ─────────────────────────────────────────────────────────── */

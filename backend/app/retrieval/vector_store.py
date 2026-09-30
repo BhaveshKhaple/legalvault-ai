@@ -151,9 +151,10 @@ def query(
         must=[FieldCondition(key="case_id", match=MatchValue(value=case_id))]
     )
 
-    results = client.search(
+    # qdrant-client >= 1.7 replaced search() with query_points()
+    response = client.query_points(
         collection_name=_COLLECTION,
-        query_vector=vector,
+        query=vector,
         query_filter=case_filter,
         limit=top_k,
         with_payload=True,
@@ -165,7 +166,7 @@ def query(
             "score": float(r.score),
             "payload": r.payload or {},
         }
-        for r in results
+        for r in response.points
     ]
 
 
@@ -184,10 +185,12 @@ def delete_by_doc(doc_id: str) -> int:
     doc_filter = Filter(
         must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
     )
-    result = client.delete(
+    # Count before deleting — qdrant-client 1.7+ result has no .deleted count
+    count_before = client.count(
         collection_name=_COLLECTION,
-        points_selector=doc_filter,
-    )
-    deleted = getattr(result, "deleted", 0) or 0
-    logger.info("Purged %d vectors for doc_id='%s'.", deleted, doc_id)
-    return deleted
+        count_filter=doc_filter,
+        exact=True,
+    ).count
+    client.delete(collection_name=_COLLECTION, points_selector=doc_filter)
+    logger.info("Purged %d vectors for doc_id='%s'.", count_before, doc_id)
+    return count_before

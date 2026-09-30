@@ -3,7 +3,6 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -31,6 +30,22 @@ async def run_query(
     if not body.question.strip():
         raise HTTPException(status_code=422, detail="Question must not be empty")
 
-    # RAG pipeline includes CPU-bound embedding + Ollama HTTP call
-    result = await run_rag(case_id, body.question, session)
-    return result
+    try:
+        result = await run_rag(case_id, body.question, session)
+        return result
+    except Exception as exc:
+        # Surface actionable errors to the UI instead of a bare 500
+        msg = str(exc)
+        if "OllamaUnavailable" in type(exc).__name__ or "11434" in msg or "Connection" in msg:
+            raise HTTPException(
+                status_code=503,
+                detail="Ollama is not running. Start it with: ollama serve",
+            )
+        if "model" in msg.lower() and ("not found" in msg.lower() or "pull" in msg.lower()):
+            from backend.app.llm.model_selector import get_model
+            tier = get_model()
+            raise HTTPException(
+                status_code=503,
+                detail=f"LLM model '{tier.llm}' not found in Ollama. Run: ollama pull {tier.llm}",
+            )
+        raise HTTPException(status_code=500, detail=f"Query failed: {msg[:300]}")

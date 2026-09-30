@@ -74,11 +74,36 @@ async def get_case(case_id: uuid.UUID, session: AsyncSession = Depends(get_sessi
     }
 
 
-@router.delete("/{case_id}", summary="Delete a case")
+@router.delete("/{case_id}", summary="Delete a case and all its documents/chunks")
 async def delete_case(case_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+    from backend.app.models import Chunk
+    from backend.app.retrieval.vector_store import delete_by_doc
+    from fastapi.concurrency import run_in_threadpool
+
     case = await session.get(Case, case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    # Load documents first, then delete chunks and Qdrant vectors per doc
+    docs_result = await session.exec(select(Document).where(Document.case_id == case_id))
+    docs = docs_result.all()
+    total_chunks = 0
+    for doc in docs:
+        # Remove Qdrant vectors
+        removed = await run_in_threadpool(delete_by_doc, str(doc.id))
+        total_chunks += removed
+        # Remove chunks from SQLite
+        chunks_result = await session.exec(select(Chunk).where(Chunk.document_id == doc.id))
+        for ch in chunks_result.all():
+            await session.delete(ch)
+        # Remove file from disk
+        try:
+            from pathlib import Path as _Path
+            _Path(doc.storage_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        await session.delete(doc)
+
     await session.delete(case)
     await session.commit()
-    return {"deleted": True, "case_id": str(case_id)}
+    return {"deleted": True, "case_id": str(case_id), "docs_removed": len(docs), "chunks_removed": total_chunks}

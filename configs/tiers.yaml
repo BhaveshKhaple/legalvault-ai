@@ -17,7 +17,7 @@ tier_2:
   description: "Office laptop (8GB RAM, no GPU)"
   embedding: "intfloat/e5-small-v2"
   embedding_dim: 384
-  llm: "phi4-q4"                         # 14B Q4, ~8GB RAM via Ollama
+  llm: "phi3:mini"                       # 3.8B Q4 — phi4 (14B) exceeds 8GB RAM
   vector_store: "qdrant"
 
 tier_3:

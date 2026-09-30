@@ -97,10 +97,12 @@ async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> d
     from backend.app.llm.prompts.citation_prompt import EvidenceChunk, build_citation_prompt
     from backend.app.llm.ollama_client import generate
 
+    _MAX_CONTENT = 600  # chars per chunk — keeps total prompt under ~2k tokens
     evidence_chunks: list[EvidenceChunk] = []
     for c in top_chunks:
         payload = c.get("payload", {})
         content = payload.get("content") or c.get("content", "")
+        content = content[:_MAX_CONTENT] + ("…" if len(content) > _MAX_CONTENT else "")
         evidence_chunks.append(EvidenceChunk(
             chunk_id=c.get("chunk_id", ""),
             filename=payload.get("filename", "document"),
