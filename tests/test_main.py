@@ -1,8 +1,6 @@
 """
 Task 6.1/6.2 — FastAPI smoke tests.
-
-Updated in 6.2: case/document routes now require a real DB session.
-The fixture injects an in-memory SQLite session so tests remain fast.
+Task 6.4 — Fixture now registers an admin user and injects Authorization.
 """
 
 import uuid
@@ -36,6 +34,12 @@ async def client():
     app.dependency_overrides[get_session] = _override
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        reg = await ac.post(
+            "/v1/auth/register",
+            json={"email": "smoke@example.com", "password": "hunter2hunter"},
+        )
+        assert reg.status_code == 201, reg.text
+        ac.headers["Authorization"] = f"Bearer {reg.json()['access_token']}"
         yield ac
 
     app.dependency_overrides.clear()
@@ -72,12 +76,14 @@ class TestCaseRoutes:
 
 class TestDocumentRoutes:
     async def test_upload_requires_file(self, client):
-        # Real endpoint now — missing multipart file returns 422
-        resp = await client.post(f"/v1/cases/{uuid.uuid4()}/documents")
+        # Create a real case first so we clear the auth/ownership check
+        r = await client.post("/v1/cases", json={"name": "Doc Smoke"})
+        case_id = r.json()["case_id"]
+        resp = await client.post(f"/v1/cases/{case_id}/documents")
         assert resp.status_code == 422
 
     async def test_status_unknown_doc(self, client):
-        # Real endpoint — unknown doc returns 404
+        # Unknown case → 404 (ownership check runs first)
         resp = await client.get(
             f"/v1/cases/{uuid.uuid4()}/documents/{uuid.uuid4()}/status"
         )
@@ -86,7 +92,6 @@ class TestDocumentRoutes:
 
 class TestQueryRoute:
     async def test_query_real_case(self, client):
-        # Create a real case first — query endpoint validates case existence
         r = await client.post("/v1/cases", json={"name": "Query Smoke"})
         case_id = r.json()["case_id"]
         resp = await client.post(
@@ -109,7 +114,6 @@ class TestQueryRoute:
 
 class TestShieldRoute:
     async def test_shield_unknown_case(self, client):
-        # Real endpoint — unknown case_id returns 404
         resp = await client.post(
             f"/v1/cases/{uuid.uuid4()}/shield",
             json={"source_doc_id": str(uuid.uuid4())},
@@ -118,6 +122,9 @@ class TestShieldRoute:
 
 
 class TestAuthRoute:
-    async def test_login_stub(self, client):
-        resp = await client.post("/v1/auth/login")
+    async def test_me_returns_registered_user(self, client):
+        # `client` fixture already registered smoke@example.com as admin
+        resp = await client.get("/v1/auth/me")
         assert resp.status_code == 200
+        assert resp.json()["email"] == "smoke@example.com"
+        assert resp.json()["role"] == "admin"
