@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LegalVault AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Design tokens (DESIGN.md §3) ───────────────────────────────────────── */
+:root {
+  --paper: #F6F4EF; --surface: #FFFFFF; --line: #E2DCCF; --line-2: #EFEAE1;
+  --ink: #17233C; --ink-2: #4A5872; --ink-3: #5E6A7E;
+  --navy-900: #0F1F3A; --navy-800: #16294D; --navy-700: #20386B; --navy-100: #E5EBF5;
+  --gold: #A9812F; --gold-deep: #8A6B1F; --gold-tint: #F2E9D7;
+  --green: #1F7A45; --green-tint: #E8F5EE;
+  --amber: #8F5211; --amber-tint: #FDF0E3;
+  --red: #B0342C; --red-tint: #FDECEA;
+  --r4: 4px; --r8: 8px; --r12: 12px;
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--navy-100); color: var(--ink); }
+::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: var(--paper); }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+html { font-size: 16px; }
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: var(--paper);
+       color: var(--ink); line-height: 1.5; caret-color: var(--navy-700); }
+h1,h2,h3 { font-family: 'Source Serif 4', Georgia, serif; }
+code, .mono { font-family: 'IBM Plex Mono', monospace; }
+
+/* ── Status pill (on-prem badge) ───────────────────────────────────────── */
+.status-pill { display: inline-flex; align-items: center; gap: 6px;
+  background: var(--navy-100); color: var(--navy-700); font-size: 12px;
+  font-weight: 500; padding: 4px 10px; border-radius: 20px; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+/* ── Top nav ────────────────────────────────────────────────────────────── */
+.topnav { background: var(--navy-900); border-bottom: 1px solid var(--navy-800);
+  padding: 0 32px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 28px; height: 28px; background: var(--gold); border-radius: var(--r4);
+  display: flex; align-items: center; justify-content: center; }
+.brand-mark svg { fill: white; width: 16px; height: 16px; }
+.brand-name { font-family: 'Source Serif 4', serif; font-size: 17px; font-weight: 700; color: #fff; }
+.nav-pill { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 20px;
+  padding: 3px 12px; font-size: 12px; display: flex; align-items: center; gap: 5px; }
+.nav-dot { width: 5px; height: 5px; border-radius: 50%; background: #4ade80; }
+
+/* ── Page layout ────────────────────────────────────────────────────────── */
+.page { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+.page-header { margin-bottom: 28px; }
+.page-title { font-size: 26px; font-weight: 700; color: var(--ink); letter-spacing: -0.3px; }
+.page-subtitle { color: var(--ink-2); font-size: 14px; margin-top: 4px; }
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px;
+  border-radius: var(--r8); font-family: inherit; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: none; text-decoration: none;
+  transition: opacity 150ms var(--ease), transform 150ms var(--ease);
+  outline: none; }
+.btn:focus-visible { box-shadow: 0 0 0 2px var(--navy-700); }
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--navy-800); color: #fff; }
+.btn-primary:hover { background: var(--navy-700); }
+.btn-secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.btn-secondary:hover { background: var(--paper); }
+.btn-gold { background: var(--gold-deep); color: #fff; }
+.btn-gold:hover { background: var(--gold); }
+.btn-ghost { background: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--paper); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-sm { padding: 5px 12px; font-size: 13px; }
+
+/* ── Cards / surfaces ───────────────────────────────────────────────────── */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r8); }
+.card-body { padding: 20px 24px; }
+.divider { height: 1px; background: var(--line); border: none; margin: 0; }
+
+/* ── Screens ────────────────────────────────────────────────────────────── */
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* ══════════════════════════════════════════════════════════════
+   LOGIN SCREEN
+══════════════════════════════════════════════════════════════ */
+#screen-login { min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; background: var(--paper); }
+.login-box { width: 360px; }
+.login-logo { text-align: center; margin-bottom: 32px; }
+.login-logo .brand-mark { width: 48px; height: 48px; margin: 0 auto 12px; border-radius: var(--r8); }
+.login-logo .brand-mark svg { width: 24px; height: 24px; }
+.login-logo h1 { font-size: 22px; color: var(--ink); }
+.login-logo p { font-size: 13px; color: var(--ink-3); margin-top: 4px; }
+.login-card { padding: 28px; }
+.field-label { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-bottom: 6px; display: block; }
+.field-input { width: 100%; padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: var(--r8); font-family: inherit; font-size: 14px; color: var(--ink);
+  background: var(--surface); outline: none; transition: border-color 150ms; }
+.field-input:focus { border-color: var(--navy-700); box-shadow: 0 0 0 2px var(--navy-100); }
+.field-group { margin-bottom: 16px; }
+.login-btn { width: 100%; margin-top: 8px; justify-content: center; padding: 10px; font-size: 15px; }
+.login-footer { text-align: center; margin-top: 16px; font-size: 12px; color: var(--ink-3); }
+.login-footer a { color: var(--navy-700); text-decoration: none; }
+.onprem-note { margin-top: 20px; text-align: center; }
+
+/* ══════════════════════════════════════════════════════════════
+   CASES LIST SCREEN
+══════════════════════════════════════════════════════════════ */
+.cases-toolbar { display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 20px; }
+.cases-count { font-size: 13px; color: var(--ink-3); }
+.cases-table { width: 100%; border-collapse: collapse; }
+.cases-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-3);
+  padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--paper);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.cases-table td { padding: 13px 16px; border-bottom: 1px solid var(--line-2);
+  font-size: 14px; vertical-align: middle; }
+.cases-table tr:hover td { background: var(--paper); }
+.case-name { font-weight: 500; }
+.case-meta { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
+  border-radius: 20px; font-size: 12px; font-weight: 500; }
+.pill-doc { background: var(--navy-100); color: var(--navy-700); }
+.pill-verified { background: var(--green-tint); color: var(--green); }
+.pill-unverified { background: var(--amber-tint); color: var(--amber); }
+.pill-contradicted { background: var(--red-tint); color: var(--red); }
+.pill-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.new-case-modal { display: none; position: fixed; inset: 0; background: rgba(15,31,58,0.45);
+  z-index: 100; align-items: center; justify-content: center; }
+.new-case-modal.open { display: flex; }
+.modal-card { width: 440px; padding: 28px; }
+.modal-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; color: var(--ink); }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.select-input { width: 100%; padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: var(--r8); font-family: inherit; font-size: 14px; color: var(--ink);
+  background: var(--surface); outline: none; }
+.select-input:focus { border-color: var(--navy-700); }
+
+/* ══════════════════════════════════════════════════════════════
+   CASE DETAIL SCREEN (TABS)
+══════════════════════════════════════════════════════════════ */
+.case-header { display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 24px; }
+.case-header-info h2 { font-size: 22px; color: var(--ink); }
+.case-header-info .meta { font-size: 13px; color: var(--ink-3); margin-top: 4px; }
+.tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.tab { padding: 10px 18px; font-size: 14px; font-weight: 500; color: var(--ink-3);
+  cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 150ms, border-color 150ms; }
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--navy-800); border-bottom-color: var(--navy-800); }
+
+/* Search tab */
+.query-layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
+@media (max-width: 900px) { .query-layout { grid-template-columns: 1fr; } }
+.query-bar-wrap { position: relative; margin-bottom: 24px; }
+.query-input { width: 100%; padding: 12px 48px 12px 16px; border: 1px solid var(--line);
+  border-radius: var(--r8); font-family: 'IBM Plex Sans', sans-serif; font-size: 15px;
+  color: var(--ink); background: var(--surface); outline: none;
+  transition: border-color 150ms; resize: none; }
+.query-input:focus { border-color: var(--navy-700); box-shadow: 0 0 0 2px var(--navy-100); }
+.query-send-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: var(--navy-800); border: none; border-radius: var(--r4);
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background 150ms; }
+.query-send-btn:hover { background: var(--navy-700); }
+.query-send-btn svg { fill: white; width: 14px; height: 14px; }
+.chips-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.chip { padding: 5px 12px; border-radius: 20px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 13px; color: var(--ink-2);
+  cursor: pointer; transition: background 150ms, border-color 150ms; }
+.chip:hover { background: var(--paper); border-color: var(--navy-700); color: var(--navy-700); }
+.answer-card { padding: 20px 24px; margin-bottom: 4px; }
+.answer-heading { font-size: 18px; color: var(--ink); margin-bottom: 12px; }
+.answer-body { font-size: 15px; line-height: 1.7; color: var(--ink); white-space: pre-wrap; }
+.answer-cite { color: var(--navy-700); font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px; background: var(--navy-100); padding: 1px 5px; border-radius: 3px;
+  text-decoration: none; cursor: pointer; }
+.answer-meta { font-size: 12px; color: var(--ink-3); margin-top: 14px;
+  padding-top: 12px; border-top: 1px solid var(--line-2); font-family: 'IBM Plex Mono', monospace; }
+.evidence-rail { position: sticky; top: 24px; }
+.rail-title { font-size: 12px; font-weight: 600; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+.evidence-card { padding: 14px 16px; margin-bottom: 10px; }
+.evidence-ref { font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+  color: var(--gold-deep); font-weight: 500; margin-bottom: 6px; }
+.evidence-snippet { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.evidence-score { font-size: 11px; color: var(--ink-3); margin-top: 8px;
+  font-family: 'IBM Plex Mono', monospace; }
+.empty-state { text-align: center; padding: 60px 24px; }
+.empty-icon { font-size: 36px; margin-bottom: 12px; }
+.empty-title { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.empty-desc { font-size: 14px; color: var(--ink-3); }
+.loading-bar { height: 3px; background: var(--navy-100); border-radius: 2px; overflow: hidden;
+  margin-bottom: 16px; display: none; }
+.loading-bar.active { display: block; }
+.loading-bar::after { content: ''; display: block; height: 100%;
+  background: var(--navy-700); animation: loadslide 1.4s ease-in-out infinite;
+  border-radius: 2px; }
+@keyframes loadslide { 0% { width: 0; margin-left: 0; } 50% { width: 60%; margin-left: 20%; } 100% { width: 0; margin-left: 100%; } }
+
+/* Documents tab */
+.upload-zone { border: 2px dashed var(--line); border-radius: var(--r8);
+  padding: 40px 24px; text-align: center; margin-bottom: 24px;
+  transition: border-color 150ms, background 150ms; cursor: pointer; }
+.upload-zone:hover, .upload-zone.drag { border-color: var(--navy-700); background: var(--navy-100); }
+.upload-icon { font-size: 32px; margin-bottom: 10px; }
+.upload-label { font-size: 15px; font-weight: 500; color: var(--ink); margin-bottom: 4px; }
+.upload-hint { font-size: 13px; color: var(--ink-3); }
+.upload-input { display: none; }
+.doc-list { list-style: none; }
+.doc-item { display: flex; align-items: center; gap: 12px; padding: 12px 0;
+  border-bottom: 1px solid var(--line-2); }
+.doc-icon { width: 36px; height: 36px; background: var(--navy-100); border-radius: var(--r4);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.doc-icon svg { fill: var(--navy-700); width: 18px; height: 18px; }
+.doc-info { flex: 1; min-width: 0; }
+.doc-name { font-size: 14px; font-weight: 500; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-meta-line { font-size: 12px; color: var(--ink-3); font-family: 'IBM Plex Mono', monospace; }
+.status-badge { padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.status-done { background: var(--green-tint); color: var(--green); }
+.status-indexing { background: var(--amber-tint); color: var(--amber); }
+.status-error { background: var(--red-tint); color: var(--red); }
+.status-pending { background: var(--navy-100); color: var(--navy-700); }
+.progress-wrap { width: 100%; height: 3px; background: var(--navy-100); border-radius: 2px; margin-top: 6px; }
+.progress-bar { height: 100%; background: var(--navy-700); border-radius: 2px; transition: width 300ms; }
+
+/* Shield tab */
+.shield-upload { margin-bottom: 28px; }
+.shield-upload-label { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-bottom: 8px; }
+.trust-ring-wrap { display: flex; align-items: center; gap: 32px; margin-bottom: 28px;
+  padding: 24px; }
+.trust-ring { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+.trust-ring svg { width: 100%; height: 100%; }
+.trust-ring-score { position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; }
+.trust-ring-num { font-family: 'Source Serif 4', serif; font-size: 26px; font-weight: 700; line-height: 1; }
+.trust-ring-den { font-size: 11px; color: var(--ink-3); }
+.trust-band { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.trust-band.strong { color: var(--green); }
+.trust-band.review { color: var(--amber); }
+.trust-band.at_risk { color: var(--red); }
+.trust-verdict { font-size: 13px; color: var(--ink-3); }
+.kpi-strip { display: flex; gap: 0; border: 1px solid var(--line); border-radius: var(--r8);
+  overflow: hidden; margin-bottom: 24px; }
+.kpi-item { flex: 1; padding: 16px 20px; border-right: 1px solid var(--line); }
+.kpi-item:last-child { border-right: none; }
+.kpi-label { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 4px; font-family: 'IBM Plex Mono', monospace; }
+.kpi-value { font-family: 'Source Serif 4', serif; font-size: 26px; font-weight: 700; color: var(--ink); }
+.kpi-value.green { color: var(--green); } .kpi-value.amber { color: var(--amber); } .kpi-value.red { color: var(--red); }
+.shield-section { margin-bottom: 24px; }
+.shield-section-title { font-size: 13px; font-weight: 600; color: var(--ink-2);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.claim-row { padding: 10px 16px; border: 1px solid var(--line); border-radius: var(--r4);
+  margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px; }
+.claim-status { flex-shrink: 0; margin-top: 2px; }
+.claim-text { font-size: 13px; color: var(--ink); line-height: 1.5; }
+.missing-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px;
+  border: 1px solid var(--line); border-radius: 20px; font-size: 13px; color: var(--ink-3);
+  margin: 4px; background: var(--surface); }
+.missing-chip svg { fill: var(--ink-3); width: 12px; height: 12px; }
+.shield-audit-meta { font-size: 11px; color: var(--ink-3); font-family: 'IBM Plex Mono', monospace;
+  padding: 10px 0; border-top: 1px solid var(--line-2); margin-top: 20px; }
+
+/* ── Toasts ────────────────────────────────────────────────────────────── */
+.toast-area { position: fixed; bottom: 24px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+.toast { padding: 12px 18px; border-radius: var(--r8); font-size: 14px; font-weight: 500;
+  color: #fff; max-width: 320px; animation: slideup 220ms var(--ease); }
+.toast-ok { background: var(--green); } .toast-err { background: var(--red); }
+@keyframes slideup { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     LOGIN SCREEN
+═══════════════════════════════════════════════════════ -->
+<div id="screen-login" class="screen active">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.25 3.5 10.2 8 11.2C16.5 22.2 20 17.25 20 12V6l-8-4z"/></svg>
+      </div>
+      <h1>LegalVault AI</h1>
+      <p>On-premise legal intelligence</p>
+    </div>
+    <div class="card login-card">
+      <div class="field-group">
+        <label class="field-label" for="email">Email</label>
+        <input class="field-input" type="email" id="email" placeholder="analyst@firm.com" value="demo@firm.com" autocomplete="email">
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="password">Password</label>
+        <input class="field-input" type="password" id="password" placeholder="••••••••" value="demo" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary login-btn" onclick="doLogin()">Sign in</button>
+    </div>
+    <div class="onprem-note">
+      <span class="status-pill"><span class="status-dot"></span>On-prem · documents never leave this machine</span>
+    </div>
+    <div class="login-footer" style="margin-top:12px;">Forgot password? Contact your administrator</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     CASES LIST SCREEN
+═══════════════════════════════════════════════════════ -->
+<div id="screen-cases" class="screen">
+  <nav class="topnav">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.25 3.5 10.2 8 11.2C16.5 22.2 20 17.25 20 12V6l-8-4z"/></svg></div>
+      <span class="brand-name">LegalVault AI</span>
+    </div>
+    <div class="nav-pill"><span class="nav-dot"></span>On-prem · documents never leave this machine</div>
+    <button class="btn btn-ghost btn-sm" onclick="doLogout()" style="color:rgba(255,255,255,0.7)">Sign out</button>
+  </nav>
+  <div class="page">
+    <div class="page-header">
+      <div class="cases-toolbar">
+        <div>
+          <div class="page-title">Cases</div>
+          <div class="page-subtitle" id="cases-count-label">Loading…</div>
+        </div>
+        <button class="btn btn-primary" onclick="openNewCase()">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          New case
+        </button>
+      </div>
+    </div>
+    <div class="card">
+      <table class="cases-table" id="cases-table">
+        <thead>
+          <tr>
+            <th>Case name</th>
+            <th>Type</th>
+            <th>Documents</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="cases-body">
+          <tr><td colspan="5" style="text-align:center;color:var(--ink-3);padding:40px;">Loading cases…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- New case modal -->
+<div class="new-case-modal" id="new-case-modal">
+  <div class="card modal-card">
+    <div class="modal-title">New case</div>
+    <div class="field-group">
+      <label class="field-label">Case name</label>
+      <input class="field-input" id="new-case-name" placeholder="Mehta v. Shoreline Builders">
+    </div>
+    <div class="field-group">
+      <label class="field-label">Client name (optional)</label>
+      <input class="field-input" id="new-case-client" placeholder="R.K. Mehta">
+    </div>
+    <div class="field-group">
+      <label class="field-label">Document type</label>
+      <select class="select-input" id="new-case-type">
+        <option value="contract">Contract</option>
+        <option value="audit_report">Audit report</option>
+        <option value="agreement">Agreement / NDA</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeNewCase()">Cancel</button>
+      <button class="btn btn-primary" onclick="createCase()">Create case</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     CASE DETAIL SCREEN
+═══════════════════════════════════════════════════════ -->
+<div id="screen-detail" class="screen">
+  <nav class="topnav">
+    <div class="brand">
+      <button class="btn btn-ghost btn-sm" onclick="goBack()" style="color:rgba(255,255,255,0.7);margin-right:8px">← Cases</button>
+      <div class="brand-mark"><svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.25 3.5 10.2 8 11.2C16.5 22.2 20 17.25 20 12V6l-8-4z"/></svg></div>
+      <span class="brand-name">LegalVault AI</span>
+    </div>
+    <div class="nav-pill"><span class="nav-dot"></span>On-prem · documents never leave this machine</div>
+    <button class="btn btn-ghost btn-sm" onclick="doLogout()" style="color:rgba(255,255,255,0.7)">Sign out</button>
+  </nav>
+  <div class="page">
+    <div class="case-header">
+      <div class="case-header-info">
+        <h2 id="detail-case-name">Loading…</h2>
+        <div class="meta" id="detail-case-meta"></div>
+      </div>
+      <button class="btn btn-gold btn-sm" id="export-btn" disabled>Export evidence pack</button>
+    </div>
+
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('search',this)">Search documents</div>
+      <div class="tab" onclick="switchTab('documents',this)">Documents</div>
+      <div class="tab" onclick="switchTab('shield',this)">Report Shield</div>
+    </div>
+
+    <!-- SEARCH TAB -->
+    <div id="tab-search" class="tab-content">
+      <div class="loading-bar" id="query-loading"></div>
+      <div class="query-bar-wrap">
+        <textarea class="query-input" id="query-input" rows="2"
+          placeholder="Ask a question about this case's documents…"
+          onkeydown="handleQueryKey(event)"></textarea>
+        <button class="query-send-btn" onclick="runQuery()">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      <div class="chips-row">
+        <span class="chip" onclick="setQuery('What are the penalty clauses?')">Penalty clauses</span>
+        <span class="chip" onclick="setQuery('What is the termination notice period?')">Termination notice</span>
+        <span class="chip" onclick="setQuery('Who bears liability in case of breach?')">Liability on breach</span>
+        <span class="chip" onclick="setQuery('What is the payment schedule?')">Payment schedule</span>
+      </div>
+      <div id="query-result">
+        <div class="empty-state">
+          <div class="empty-icon">📄</div>
+          <div class="empty-title">Ask a question about this case</div>
+          <div class="empty-desc">Every answer includes numbered citations so you can verify the source.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOCUMENTS TAB -->
+    <div id="tab-documents" class="tab-content" style="display:none">
+      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()"
+           ondragover="event.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleDrop(event)">
+        <div class="upload-icon">⬆</div>
+        <div class="upload-label">Drop PDF or audio files here</div>
+        <div class="upload-hint">PDF contracts, agreements, reports · MP3, WAV audio recordings · Max 50 MB</div>
+        <input type="file" id="file-input" class="upload-input" accept=".pdf,.mp3,.wav,.m4a,.ogg" multiple onchange="handleFileSelect(event)">
+      </div>
+      <div class="card">
+        <ul class="doc-list card-body" id="doc-list">
+          <li style="text-align:center;color:var(--ink-3);padding:32px 0;">No documents yet — upload a PDF or audio file.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SHIELD TAB -->
+    <div id="tab-shield" class="tab-content" style="display:none">
+      <div class="shield-upload card card-body" style="margin-bottom:20px;">
+        <div class="shield-upload-label">Select a document to audit with Report Shield:</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <select class="select-input" id="shield-doc-select" style="flex:1;min-width:200px;">
+            <option value="">— Choose a document —</option>
+          </select>
+          <button class="btn btn-primary" onclick="runShield()">Run audit</button>
+        </div>
+      </div>
+      <div id="shield-result">
+        <div class="empty-state">
+          <div class="empty-icon">🛡</div>
+          <div class="empty-title">Report Shield</div>
+          <div class="empty-desc">Select a document above and click Run audit to verify all claims against indexed case documents.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast area -->
+<div class="toast-area" id="toast-area"></div>
+
+<script>
+/* ── State ─────────────────────────────────────────────────────────────── */
+const API = '';  // same origin
+let currentCaseId = null;
+let currentCaseName = null;
+let currentDocs = [];
+
+/* ── Helpers ────────────────────────────────────────────────────────────── */
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function toast(msg, type='ok') {
+  const a = document.getElementById('toast-area');
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  a.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: {'Content-Type': 'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail||r.statusText); }
+  return r.json();
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+}
+
+/* ── Login / Logout ─────────────────────────────────────────────────────── */
+function doLogin() {
+  // No real auth until Task 6.4 — just navigate to cases
+  show('screen-cases');
+  loadCases();
+}
+
+function doLogout() { show('screen-login'); }
+
+/* ── Cases list ─────────────────────────────────────────────────────────── */
+async function loadCases() {
+  try {
+    const cases = await api('GET', '/v1/cases');
+    const label = document.getElementById('cases-count-label');
+    label.textContent = `${cases.length} case${cases.length !== 1 ? 's' : ''}`;
+    const body = document.getElementById('cases-body');
+    if (!cases.length) {
+      body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--ink-3);padding:48px 0;">
+        No cases yet — create your first case to get started.</td></tr>`;
+      return;
+    }
+    body.innerHTML = cases.map(c => `
+      <tr>
+        <td>
+          <div class="case-name">${esc(c.name)}</div>
+          ${c.client_name ? `<div class="case-meta">${esc(c.client_name)}</div>` : ''}
+        </td>
+        <td><span class="pill pill-doc">${esc(c.doc_type)}</span></td>
+        <td class="mono" style="font-size:13px;">${c.document_count}</td>
+        <td style="font-size:13px;color:var(--ink-3);font-family:'IBM Plex Mono',monospace;">${fmtDate(c.created_at)}</td>
+        <td><button class="btn btn-secondary btn-sm" onclick="openCase('${c.case_id}','${esc(c.name)}','${esc(c.doc_type)}')">Open</button></td>
+      </tr>`).join('');
+  } catch(e) { toast('Could not load cases: ' + e.message, 'err'); }
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* ── New case modal ─────────────────────────────────────────────────────── */
+function openNewCase() { document.getElementById('new-case-modal').classList.add('open'); }
+function closeNewCase() { document.getElementById('new-case-modal').classList.remove('open'); }
+async function createCase() {
+  const name = document.getElementById('new-case-name').value.trim();
+  if (!name) { toast('Enter a case name', 'err'); return; }
+  try {
+    const c = await api('POST', '/v1/cases', {
+      name,
+      client_name: document.getElementById('new-case-client').value.trim() || null,
+      doc_type: document.getElementById('new-case-type').value,
+    });
+    closeNewCase();
+    toast(`Case "${c.name}" created`);
+    loadCases();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+/* ── Case detail ─────────────────────────────────────────────────────────── */
+function openCase(caseId, caseName, docType) {
+  currentCaseId = caseId;
+  currentCaseName = caseName;
+  document.getElementById('detail-case-name').textContent = caseName;
+  document.getElementById('detail-case-meta').textContent = docType;
+  // Reset tabs
+  switchTabTo('search');
+  document.getElementById('query-result').innerHTML = `<div class="empty-state">
+    <div class="empty-icon">📄</div>
+    <div class="empty-title">Ask a question about this case</div>
+    <div class="empty-desc">Every answer includes numbered citations so you can verify the source.</div></div>`;
+  show('screen-detail');
+  loadDocs();
+}
+
+function goBack() { show('screen-cases'); loadCases(); }
+
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  switchTabTo(name);
+}
+
+function switchTabTo(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+  document.getElementById('tab-' + name).style.display = 'block';
+  if (name === 'shield') refreshShieldDocList();
+}
+
+/* ── Query / Search tab ─────────────────────────────────────────────────── */
+function setQuery(q) { document.getElementById('query-input').value = q; runQuery(); }
+
+function handleQueryKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runQuery(); } }
+
+async function runQuery() {
+  const q = document.getElementById('query-input').value.trim();
+  if (!q) return;
+  document.getElementById('query-loading').classList.add('active');
+  document.getElementById('export-btn').disabled = true;
+
+  try {
+    const res = await api('POST', `/v1/cases/${currentCaseId}/query`, { question: q });
+    renderAnswer(res, q);
+    document.getElementById('export-btn').disabled = false;
+  } catch(e) {
+    document.getElementById('query-result').innerHTML = `<div class="empty-state">
+      <div class="empty-icon">⚠</div>
+      <div class="empty-title">Query failed</div>
+      <div class="empty-desc">${esc(e.message)}</div></div>`;
+  } finally {
+    document.getElementById('query-loading').classList.remove('active');
+  }
+}
+
+function renderAnswer(res, question) {
+  const evidence = res.evidence || [];
+  const evidenceHtml = evidence.length ? evidence.map((e,i) => `
+    <div class="card evidence-card">
+      <div class="evidence-ref">[${i+1}] ${esc(e.filename||'document')}${e.page ? ` p.${e.page}` : e.ts_start ? ` t.${e.ts_start}s` : ''}${e.section_title ? ` · ${esc(e.section_title)}` : ''}</div>
+      <div class="evidence-snippet">${esc(e.content.slice(0,240))}${e.content.length>240?'…':''}</div>
+      <div class="evidence-score">score ${(e.score*100).toFixed(0)}%</div>
+    </div>`).join('') : '<div style="color:var(--ink-3);font-size:13px;">No evidence retrieved.</div>';
+
+  document.getElementById('query-result').innerHTML = `
+    <div class="query-layout">
+      <div>
+        <div class="card answer-card">
+          <div class="answer-heading">${esc(question)}</div>
+          <div class="answer-body">${esc(res.answer)}</div>
+          <div class="answer-meta">confidence ${(res.confidence*100).toFixed(0)}% · ${res.latency_ms}ms · ${evidence.length} source${evidence.length!==1?'s':''} · audit logged · append-only</div>
+        </div>
+      </div>
+      <div class="evidence-rail">
+        <div class="rail-title">Evidence</div>
+        ${evidenceHtml}
+      </div>
+    </div>`;
+}
+
+/* ── Documents tab ──────────────────────────────────────────────────────── */
+async function loadDocs() {
+  try {
+    const c = await api('GET', `/v1/cases/${currentCaseId}`);
+    currentDocs = c.documents || [];
+    renderDocList();
+  } catch(e) { toast('Could not load documents', 'err'); }
+}
+
+function renderDocList() {
+  const el = document.getElementById('doc-list');
+  if (!currentDocs.length) {
+    el.innerHTML = '<li style="text-align:center;color:var(--ink-3);padding:32px 0;">No documents yet — upload a PDF or audio file.</li>';
+    return;
+  }
+  el.innerHTML = currentDocs.map(d => `
+    <li class="doc-item">
+      <div class="doc-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg></div>
+      <div class="doc-info">
+        <div class="doc-name">${esc(d.filename)}</div>
+        <div class="doc-meta-line">${d.page_count ? d.page_count + ' pages · ' : ''}${d.doc_type} · ${fmtDate(d.created_at)}</div>
+      </div>
+      <span class="status-badge status-${d.status}">${d.status}</span>
+    </li>`).join('');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-zone').classList.remove('drag');
+  uploadFiles(Array.from(e.dataTransfer.files));
+}
+
+function handleFileSelect(e) { uploadFiles(Array.from(e.target.files)); }
+
+async function uploadFiles(files) {
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append('file', f);
+    toast(`Uploading ${f.name}…`);
+    try {
+      const r = await fetch(`${API}/v1/cases/${currentCaseId}/documents`, { method: 'POST', body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+      toast(`${f.name} indexed — ${data.chunk_count} chunks`);
+      loadDocs();
+    } catch(e) { toast(`${f.name}: ${e.message}`, 'err'); }
+  }
+}
+
+/* ── Shield tab ─────────────────────────────────────────────────────────── */
+function refreshShieldDocList() {
+  const sel = document.getElementById('shield-doc-select');
+  const pdfDocs = currentDocs.filter(d => d.doc_type === 'pdf' && d.status === 'done');
+  sel.innerHTML = '<option value="">— Choose a document —</option>' +
+    pdfDocs.map(d => `<option value="${d.document_id}">${esc(d.filename)}</option>`).join('');
+}
+
+async function runShield() {
+  const docId = document.getElementById('shield-doc-select').value;
+  if (!docId) { toast('Select a document first', 'err'); return; }
+  const res_el = document.getElementById('shield-result');
+  res_el.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Running audit…</div><div class="empty-desc">Verifying every claim against indexed documents. This may take a moment.</div></div>';
+  try {
+    const res = await api('POST', `/v1/cases/${currentCaseId}/shield`, { source_doc_id: docId });
+    renderShield(res);
+  } catch(e) { res_el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-title">Audit failed</div><div class="empty-desc">${esc(e.message)}</div></div>`; }
+}
+
+function renderShield(res) {
+  const score = res.trust_score || 0;
+  const band = res.band || 'at_risk';
+  const bandLabel = res.band_label || '';
+  const radius = 42; const circ = 2 * Math.PI * radius;
+  const dash = (score / 100) * circ;
+  const bandColor = band === 'strong' ? 'var(--green)' : band === 'review' ? 'var(--amber)' : 'var(--red)';
+
+  const verifiedHtml = (res.verified_count > 0)
+    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--green)">✓</span> Verified (${res.verified_count})</div></div>` : '';
+
+  const unverifiedHtml = (res.unverified_count > 0)
+    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--amber)">○</span> Unverified (${res.unverified_count})</div></div>` : '';
+
+  const contradictedHtml = (res.contradiction_count > 0)
+    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--red)">✗</span> Contradicted (${res.contradiction_count})</div>
+        ${(res.contradictions||[]).map(c=>`<div class="claim-row">
+          <div class="claim-status"><span class="pill pill-contradicted"><span class="pill-dot"></span>Contradicted</span></div>
+          <div class="claim-text">${esc(c.claim)}</div></div>`).join('')}
+      </div>` : '';
+
+  const missingHtml = (res.missing_count > 0)
+    ? `<div class="shield-section"><div class="shield-section-title">Missing required sections (${res.missing_count})</div>
+        <div>${(res.missing_sections||[]).map(s=>`<span class="missing-chip">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+          ${esc(s)}</span>`).join('')}</div></div>` : '';
+
+  document.getElementById('shield-result').innerHTML = `
+    <div class="card trust-ring-wrap">
+      <div class="trust-ring">
+        <svg viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="${radius}" fill="none" stroke="var(--line)" stroke-width="10"/>
+          <circle cx="50" cy="50" r="${radius}" fill="none" stroke="${bandColor}" stroke-width="10"
+            stroke-dasharray="${dash} ${circ}" stroke-dashoffset="${circ/4}"
+            stroke-linecap="round" transform="rotate(-90 50 50)" style="transition:stroke-dasharray 600ms"/>
+        </svg>
+        <div class="trust-ring-score">
+          <span class="trust-ring-num">${score}</span>
+          <span class="trust-ring-den">/100</span>
+        </div>
+      </div>
+      <div>
+        <div class="trust-band ${band}">${bandLabel}</div>
+        <div class="trust-verdict">Based on ${res.total_claims||0} claims analysed</div>
+      </div>
+    </div>
+    <div class="kpi-strip">
+      <div class="kpi-item"><div class="kpi-label">Verified</div><div class="kpi-value green">${res.verified_count}</div></div>
+      <div class="kpi-item"><div class="kpi-label">Unverified</div><div class="kpi-value amber">${res.unverified_count}</div></div>
+      <div class="kpi-item"><div class="kpi-label">Contradicted</div><div class="kpi-value red">${res.contradiction_count}</div></div>
+      <div class="kpi-item"><div class="kpi-label">Missing sections</div><div class="kpi-value ${res.missing_count>0?'amber':'green'}">${res.missing_count}</div></div>
+    </div>
+    ${verifiedHtml}${unverifiedHtml}${contradictedHtml}${missingHtml}
+    <div class="shield-audit-meta">audit R-${Date.now().toString(36).toUpperCase()} · ${new Date().toLocaleString('en-IN')} · append-only log</div>`;
+}
+</script>
+</body>
+</html>
