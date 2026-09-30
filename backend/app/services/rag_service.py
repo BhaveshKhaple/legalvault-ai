@@ -115,10 +115,13 @@ async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> d
     answer = generate(prompt, model=tier.llm)
 
     # ── 7. Format response ───────────────────────────────────────────────────
+    import math as _m
+    def _norm(x):
+        return 1.0 / (1.0 + _m.exp(-float(x)))
     evidence_out = [
         {
             "rank": i + 1,
-            "score": float(c.get("rerank_score", c.get("score", 0))),
+            "score": _norm(c.get("rerank_score", c.get("score", 0))),
             "content": ev.content,
             "filename": ev.filename,
             "page": ev.page,
@@ -128,11 +131,15 @@ async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> d
         for i, (c, ev) in enumerate(zip(top_chunks, evidence_chunks))
     ]
 
-    confidence = float(top_chunks[0].get("rerank_score", top_chunks[0].get("score", 0)))
+    # Cross-encoder scores are unbounded logits (can be negative). Sigmoid maps
+    # them to [0, 1] so the UI can render a meaningful confidence percentage.
+    import math
+    raw = float(top_chunks[0].get("rerank_score", top_chunks[0].get("score", 0)))
+    confidence = 1.0 / (1.0 + math.exp(-raw))
 
     return {
         "answer": answer,
         "evidence": evidence_out,
-        "confidence": round(min(confidence, 1.0), 4),
+        "confidence": round(confidence, 4),
         "latency_ms": int((time.perf_counter() - t0) * 1000),
     }

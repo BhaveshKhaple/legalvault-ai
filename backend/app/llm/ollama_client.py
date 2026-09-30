@@ -73,10 +73,26 @@ def generate(
     """
     full_prompt = _build_prompt(prompt, context or [])
 
+    # Perf tuning — env-overridable so we can bump up when Ollama sees the GPU.
+    # num_gpu=999 tells Ollama to put ALL layers on GPU IF the runtime detects
+    # one (no-op on CPU-only builds).
+    # num_predict caps answer length so short questions don't run for minutes.
+    # flash_attention halves prompt-processing time on CPU.
+    _num_gpu = int(os.environ.get("OLLAMA_NUM_GPU", "999"))
+    _num_predict = int(os.environ.get("OLLAMA_NUM_PREDICT", "300"))
+    _flash_attn = os.environ.get("OLLAMA_FLASH_ATTENTION", "1") == "1"
+    _num_ctx = int(os.environ.get("OLLAMA_NUM_CTX", "4096"))
+
     payload = {
         "model": model,
         "prompt": full_prompt,
         "stream": False,
+        "options": {
+            "num_gpu": _num_gpu,
+            "num_predict": _num_predict,
+            "num_ctx": _num_ctx,
+            "flash_attention": _flash_attn,
+        },
     }
 
     logger.debug("Ollama generate — model='%s', prompt_len=%d chars.", model, len(full_prompt))
