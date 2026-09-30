@@ -95,7 +95,7 @@ cd backend && pip install -r requirements.txt
 # 4. Run migrations
 alembic upgrade head
 
-# 5. Start dev server
+# 5. Start   dev server
 uvicorn app:app --reload --port 8000
 
 # 6. Open UI
