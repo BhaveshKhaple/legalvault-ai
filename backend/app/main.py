@@ -55,7 +55,7 @@ def health_check():
 
 
 # Serve HTML UI — mounted last so /v1/* API routes take precedence
-_FRONTEND_DIR = Path(__file__).parents[3] / "frontend"
+_FRONTEND_DIR = Path(__file__).parents[2] / "frontend"
 if _FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(_FRONTEND_DIR)), name="static")
 
