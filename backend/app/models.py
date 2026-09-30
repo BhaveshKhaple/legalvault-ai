@@ -9,11 +9,15 @@ Run migrations: alembic upgrade head
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ─── enums ────────────────────────────────────────────────────────────────────
@@ -64,7 +68,7 @@ class User(SQLModel, table=True):
     password_hash: str = Field(max_length=200)
     role: UserRole = Field(default=UserRole.analyst)
     org_id: Optional[uuid.UUID] = Field(default=None, foreign_key="organizations.id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class Organization(SQLModel, table=True):
@@ -72,7 +76,7 @@ class Organization(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str = Field(max_length=200)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ─── cases ────────────────────────────────────────────────────────────────────
@@ -85,9 +89,10 @@ class Case(SQLModel, table=True):
     name: str = Field(max_length=200)
     client_name: Optional[str] = Field(default=None, max_length=200)
     doc_type: DocType = Field(default=DocType.other)
-    created_by: uuid.UUID = Field(foreign_key="users.id")
-    org_id: uuid.UUID = Field(foreign_key="organizations.id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    # Optional until Task 6.4 wires auth (SQLite doesn't enforce FKs by default)
+    created_by: Optional[uuid.UUID] = Field(default=None, foreign_key="users.id")
+    org_id: Optional[uuid.UUID] = Field(default=None, foreign_key="organizations.id")
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ─── documents ────────────────────────────────────────────────────────────────
@@ -106,7 +111,7 @@ class Document(SQLModel, table=True):
     sha256: str = Field(max_length=64, index=True)
     status: IngestStatus = Field(default=IngestStatus.pending)
     error_message: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ─── chunks ───────────────────────────────────────────────────────────────────
@@ -134,12 +139,12 @@ class Query(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     case_id: uuid.UUID = Field(foreign_key="cases.id")
-    user_id: uuid.UUID = Field(foreign_key="users.id")
+    user_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.id")
     query_text: str
     answer_text: Optional[str] = Field(default=None)
     confidence: Optional[float] = Field(default=None)
     latency_ms: Optional[int] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ─── shield reports ───────────────────────────────────────────────────────────
@@ -157,7 +162,7 @@ class ShieldReport(SQLModel, table=True):
     contradiction_count: int = Field(default=0)
     missing_sections: str = Field(default="[]")  # JSON array
     flags: str = Field(default="[]")             # JSON array
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 # ─── audit log (append-only) ──────────────────────────────────────────────────
@@ -172,4 +177,4 @@ class AuditLog(SQLModel, table=True):
     resource_id: Optional[uuid.UUID] = Field(default=None)
     ip_addr: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)

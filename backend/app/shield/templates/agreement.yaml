@@ -1,0 +1,33 @@
+# Required sections for a general agreement (MOU, NDA, partnership, RERA)
+doc_type: agreement
+required_sections:
+  - name: Parties
+    keywords: ["parties", "between", "first party", "second party", "undersigned"]
+    description: "Identification of all parties to the agreement"
+  - name: Purpose and Background
+    keywords: ["purpose", "background", "recitals", "whereas", "intent", "objective"]
+    description: "Why this agreement is being entered into"
+  - name: Obligations
+    keywords: ["obligations", "responsibilities", "shall", "must", "agrees to", "undertakes"]
+    description: "Specific obligations of each party"
+  - name: Representations and Warranties
+    keywords: ["represents", "warrants", "warranties", "representations", "guarantee"]
+    description: "Factual statements each party vouches for"
+  - name: Confidentiality
+    keywords: ["confidentiality", "non-disclosure", "confidential", "proprietary", "not disclose"]
+    description: "Non-disclosure obligations"
+  - name: Intellectual Property
+    keywords: ["intellectual property", "ip", "copyright", "trademark", "proprietary rights", "ownership"]
+    description: "Who owns IP created or shared under the agreement"
+  - name: Term
+    keywords: ["term", "duration", "period", "effective", "commence", "expire"]
+    description: "How long the agreement lasts"
+  - name: Termination
+    keywords: ["termination", "terminate", "end", "cessation", "notice"]
+    description: "How and when the agreement can be terminated"
+  - name: Governing Law
+    keywords: ["governing law", "jurisdiction", "applicable law", "courts"]
+    description: "Jurisdiction and applicable law"
+  - name: Signatures
+    keywords: ["signed", "signature", "executed", "witness", "authorised signatory", "authorized"]
+    description: "Execution block with party signatures"

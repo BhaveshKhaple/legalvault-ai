@@ -106,19 +106,26 @@ class TestInsert:
 # ─── query ────────────────────────────────────────────────────────────────────
 
 
+def _query_response(hits: list) -> MagicMock:
+    """Wrap hits in a mock QueryResponse (qdrant-client >= 1.7 returns .points)."""
+    resp = MagicMock()
+    resp.points = hits
+    return resp
+
+
 class TestQuery:
     def test_returns_list(self):
         client = _fake_client()
-        client.search.return_value = []
+        client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             result = query(_make_vec(), case_id="cA")
         assert result == []
 
     def test_result_dict_shape(self):
         client = _fake_client()
-        client.search.return_value = [
+        client.query_points.return_value = _query_response([
             _hit("abc-123", 0.92, {"case_id": "cA", "content": "penalty clause"}),
-        ]
+        ])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             result = query(_make_vec(), case_id="cA")
         assert len(result) == 1
@@ -133,11 +140,11 @@ class TestQuery:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
 
         client = _fake_client()
-        client.search.return_value = []
+        client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             query(_make_vec(), case_id="secret_case_B")
 
-        call_kwargs = client.search.call_args.kwargs
+        call_kwargs = client.query_points.call_args.kwargs
         f = call_kwargs["query_filter"]
         assert isinstance(f, Filter)
         condition = f.must[0]
@@ -147,10 +154,9 @@ class TestQuery:
     def test_case_a_results_never_from_case_b(self):
         """Task 2.3 isolation: a query for case A must only show case A results."""
         client = _fake_client()
-        # Simulate server correctly filtering — only case_A payload returned
-        client.search.return_value = [
+        client.query_points.return_value = _query_response([
             _hit("id-1", 0.9, {"case_id": "case_A", "content": "A doc"}),
-        ]
+        ])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             result = query(_make_vec(), case_id="case_A")
         for r in result:
@@ -158,14 +164,14 @@ class TestQuery:
 
     def test_top_k_passed(self):
         client = _fake_client()
-        client.search.return_value = []
+        client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             query(_make_vec(), case_id="cA", top_k=5)
-        assert client.search.call_args.kwargs["limit"] == 5
+        assert client.query_points.call_args.kwargs["limit"] == 5
 
     def test_empty_result_returns_empty_list(self):
         client = _fake_client()
-        client.search.return_value = []
+        client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             assert query(_make_vec(), case_id="cA") == []
 
@@ -176,16 +182,16 @@ class TestQuery:
 class TestDeleteByDoc:
     def test_delete_called(self):
         client = _fake_client()
-        client.delete.return_value = MagicMock(deleted=3)
+        client.count.return_value = MagicMock(count=3)
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
-            n = delete_by_doc("doc_xyz")
+            delete_by_doc("doc_xyz")
         assert client.delete.call_count == 1
         call_kwargs = client.delete.call_args.kwargs
         assert call_kwargs["collection_name"] == "legalvault_chunks"
 
     def test_returns_deleted_count(self):
         client = _fake_client()
-        client.delete.return_value = MagicMock(deleted=7)
+        client.count.return_value = MagicMock(count=7)
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             n = delete_by_doc("doc_to_remove")
         assert n == 7
