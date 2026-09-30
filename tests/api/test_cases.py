@@ -1,4 +1,6 @@
-"""Tests for Task 6.2 — Cases CRUD endpoints."""
+"""Tests for Task 6.2 — Cases CRUD endpoints (auth-gated in Task 6.4)."""
+
+import uuid
 
 import pytest
 import pytest_asyncio
@@ -16,7 +18,7 @@ _TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 @pytest_asyncio.fixture
 async def client():
-    """Async test client backed by an isolated in-memory SQLite database."""
+    """Async test client + in-memory SQLite + pre-registered admin user."""
     engine = create_async_engine(_TEST_DB_URL, connect_args={"check_same_thread": False})
     Session = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -30,6 +32,12 @@ async def client():
     app.dependency_overrides[get_session] = _override
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        reg = await ac.post(
+            "/v1/auth/register",
+            json={"email": "alice@example.com", "password": "hunter2hunter"},
+        )
+        assert reg.status_code == 201, reg.text
+        ac.headers["Authorization"] = f"Bearer {reg.json()['access_token']}"
         yield ac
 
     app.dependency_overrides.clear()
@@ -81,7 +89,6 @@ async def test_get_case(client):
 
 @pytest.mark.asyncio
 async def test_get_case_not_found(client):
-    import uuid
     r = await client.get(f"/v1/cases/{uuid.uuid4()}")
     assert r.status_code == 404
 
@@ -95,3 +102,27 @@ async def test_delete_case(client):
     assert r2.json()["deleted"] is True
     r3 = await client.get(f"/v1/cases/{case_id}")
     assert r3.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_missing_auth_returns_401():
+    """No Authorization header → 401 on protected endpoints."""
+    engine = create_async_engine(_TEST_DB_URL, connect_args={"check_same_thread": False})
+    Session = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    async def _override():
+        async with Session() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = _override
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            r = await ac.get("/v1/cases")
+            assert r.status_code == 401
+            r = await ac.post("/v1/cases", json={"name": "x"})
+            assert r.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

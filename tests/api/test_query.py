@@ -1,5 +1,5 @@
 """
-Tests for Task 6.3 — Query endpoint.
+Tests for Task 6.3 — Query endpoint (auth-gated in Task 6.4).
 
 Heavy components (embeddings, Qdrant, Ollama, reranker) are mocked so the
 test suite runs without models loaded or services running.
@@ -22,9 +22,17 @@ from backend.app.main import app
 _TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 
+async def _authed(ac: AsyncClient) -> None:
+    reg = await ac.post(
+        "/v1/auth/register",
+        json={"email": "q@example.com", "password": "hunter2hunter"},
+    )
+    ac.headers["Authorization"] = f"Bearer {reg.json()['access_token']}"
+
+
 @pytest_asyncio.fixture
 async def client_with_case():
-    """Client with a pre-created case and fake DB."""
+    """Client with a pre-created case and fake DB, authenticated."""
     engine = create_async_engine(_TEST_DB_URL, connect_args={"check_same_thread": False})
     Session = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -38,6 +46,7 @@ async def client_with_case():
     app.dependency_overrides[get_session] = _override
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await _authed(ac)
         r = await ac.post("/v1/cases", json={"name": "Query Test Case"})
         case_id = r.json()["case_id"]
         yield ac, case_id
@@ -59,9 +68,32 @@ async def test_query_case_not_found():
 
     app.dependency_overrides[get_session] = _override
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await _authed(ac)
         r = await ac.post(f"/v1/cases/{uuid.uuid4()}/query",
                           json={"question": "What are the penalties?"})
         assert r.status_code == 404
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_query_requires_auth():
+    engine = create_async_engine(_TEST_DB_URL, connect_args={"check_same_thread": False})
+    Session = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    async def _override():
+        async with Session() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = _override
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post(
+            f"/v1/cases/{uuid.uuid4()}/query",
+            json={"question": "any"},
+        )
+        assert r.status_code == 401
     app.dependency_overrides.clear()
     await engine.dispose()
 
@@ -86,7 +118,6 @@ async def test_query_no_documents_returns_friendly_message(client_with_case):
     assert "answer" in body
     assert "evidence" in body
     assert body["evidence"] == []
-    # No docs indexed → friendly message
     assert "No documents" in body["answer"] or body["answer"] != ""
 
 
@@ -106,9 +137,7 @@ async def test_query_response_shape(client_with_case):
     }
 
     with patch("backend.app.services.rag_service.run_rag", return_value=mock_result):
-        # Also need to mock the case existence check which happens before run_rag
         from backend.app.models import Case
-        from datetime import datetime, timezone
         mock_case = MagicMock(spec=Case)
         mock_case.id = uuid.UUID(case_id)
 
