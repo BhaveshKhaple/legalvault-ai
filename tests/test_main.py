@@ -108,15 +108,13 @@ class TestQueryRoute:
 
 
 class TestShieldRoute:
-    async def test_shield_stub(self, client):
+    async def test_shield_unknown_case(self, client):
+        # Real endpoint — unknown case_id returns 404
         resp = await client.post(
             f"/v1/cases/{uuid.uuid4()}/shield",
             json={"source_doc_id": str(uuid.uuid4())},
         )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "trust_score" in body
-        assert "flags" in body
+        assert resp.status_code == 404
 
 
 class TestAuthRoute:
