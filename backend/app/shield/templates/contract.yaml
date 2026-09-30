@@ -1,0 +1,39 @@
+# Required sections for a standard Indian commercial contract
+doc_type: contract
+required_sections:
+  - name: Parties
+    keywords: ["parties", "between", "hereinafter", "party of the first", "party of the second"]
+    description: "Identification of contracting parties"
+  - name: Definitions
+    keywords: ["definitions", "defined terms", "means", "shall mean", "herein defined"]
+    description: "Defined terms used in the contract"
+  - name: Scope of Work
+    keywords: ["scope", "services", "deliverables", "obligations", "work to be performed"]
+    description: "What services or work is being contracted"
+  - name: Payment Terms
+    keywords: ["payment", "consideration", "fee", "invoice", "billing", "remuneration", "compensation"]
+    description: "Payment amounts, schedule, and method"
+  - name: Term and Duration
+    keywords: ["term", "duration", "commencement", "effective date", "expiry", "period of agreement"]
+    description: "When the contract starts and ends"
+  - name: Termination
+    keywords: ["termination", "terminate", "cancellation", "notice period", "end of contract"]
+    description: "Conditions under which the contract can be ended"
+  - name: Confidentiality
+    keywords: ["confidentiality", "non-disclosure", "confidential information", "nda", "proprietary"]
+    description: "Obligations to keep information confidential"
+  - name: Indemnity
+    keywords: ["indemnity", "indemnification", "indemnify", "hold harmless", "indemnified"]
+    description: "Indemnification obligations — legally required in most Indian contracts"
+  - name: Governing Law
+    keywords: ["governing law", "jurisdiction", "applicable law", "courts of", "laws of india"]
+    description: "Which law governs the contract and which court has jurisdiction"
+  - name: Dispute Resolution
+    keywords: ["dispute", "arbitration", "mediation", "resolution", "conciliation"]
+    description: "How disputes between parties are resolved"
+  - name: Liability Limitation
+    keywords: ["limitation of liability", "limit of liability", "maximum liability", "not liable", "exclude liability"]
+    description: "Cap on damages or exclusions of liability"
+  - name: Force Majeure
+    keywords: ["force majeure", "act of god", "unforeseeable", "beyond control", "natural disaster"]
+    description: "Relief from obligations due to extraordinary events"

@@ -1,0 +1,30 @@
+# Required sections for an NBFC/company audit report (India)
+doc_type: audit_report
+required_sections:
+  - name: Auditor Opinion
+    keywords: ["opinion", "we certify", "in our opinion", "true and fair", "fairly presents"]
+    description: "The auditor's formal opinion on the financial statements"
+  - name: Management Responsibility
+    keywords: ["management responsibility", "management is responsible", "board of directors"]
+    description: "Statement of management's responsibility for the financial statements"
+  - name: Basis of Opinion
+    keywords: ["basis of opinion", "audit standards", "standards on auditing", "sa 700", "icai"]
+    description: "Standards under which the audit was conducted"
+  - name: Key Audit Matters
+    keywords: ["key audit matters", "significant audit", "areas of focus", "emphasis of matter"]
+    description: "Material matters that required significant audit attention"
+  - name: Going Concern
+    keywords: ["going concern", "ability to continue", "material uncertainty", "liquidation"]
+    description: "Assessment of the entity's ability to continue as a going concern"
+  - name: Internal Controls
+    keywords: ["internal controls", "internal financial controls", "ifcfr", "control deficiency"]
+    description: "Assessment of internal financial controls"
+  - name: Compliance
+    keywords: ["compliance", "companies act", "rbi guidelines", "sebi", "statutory requirements"]
+    description: "Compliance with applicable laws and regulations"
+  - name: Financial Position
+    keywords: ["financial position", "balance sheet", "net worth", "assets", "liabilities"]
+    description: "Statement of financial position / balance sheet"
+  - name: Recommendations
+    keywords: ["recommendations", "suggest", "we recommend", "improvements", "remediation"]
+    description: "Auditor's recommendations for improvement"
