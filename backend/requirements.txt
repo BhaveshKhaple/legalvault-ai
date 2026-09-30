@@ -36,6 +36,12 @@ rank-bm25>=0.2,<0.3
 # 3.3  Cross-encoder rerank → sentence-transformers (already above)
 # 4.1  Ollama wrapper       → requests                             ← DONE
 requests>=2.32,<3.0
-# 6.1  Postgres + SQLModel  → sqlmodel, alembic, psycopg2-binary
+# 6.1  Postgres + SQLModel  → sqlmodel, alembic, psycopg2-binary  ← DONE
+sqlmodel>=0.0.22,<0.1
+alembic>=1.13,<2.0
+psycopg2-binary>=2.9,<3.0
+asyncpg>=0.30,<0.31
+pyyaml>=6.0,<7.0
+spacy>=3.8,<4.0
 # 6.4  Auth                 → argon2-cffi, python-jose[cryptography]
 # 9.3  ARQ task queue       → arq, redis
