@@ -85,9 +85,12 @@ class TestDocumentRoutes:
 
 
 class TestQueryRoute:
-    async def test_query_stub(self, client):
+    async def test_query_real_case(self, client):
+        # Create a real case first — query endpoint validates case existence
+        r = await client.post("/v1/cases", json={"name": "Query Smoke"})
+        case_id = r.json()["case_id"]
         resp = await client.post(
-            f"/v1/cases/{uuid.uuid4()}/query",
+            f"/v1/cases/{case_id}/query",
             json={"question": "What is the penalty clause?"},
         )
         assert resp.status_code == 200
@@ -95,6 +98,13 @@ class TestQueryRoute:
         assert "answer" in body
         assert "evidence" in body
         assert "confidence" in body
+
+    async def test_query_unknown_case(self, client):
+        resp = await client.post(
+            f"/v1/cases/{uuid.uuid4()}/query",
+            json={"question": "test"},
+        )
+        assert resp.status_code == 404
 
 
 class TestShieldRoute:
