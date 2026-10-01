@@ -1,4 +1,7 @@
-"""Task 6.3 — Query endpoint: wires the full RAG pipeline."""
+"""
+Task 6.3 — Query endpoint: wires the full RAG pipeline.
+Task 6.4 — Auth + ownership check via get_case_for_user.
+"""
 
 import uuid
 
@@ -6,8 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from backend.app.auth.dependencies import get_case_for_user, get_current_user
 from backend.app.database import get_session
-from backend.app.models import Case
+from backend.app.models import User
 from backend.app.services.rag_service import run_rag
 
 router = APIRouter()
@@ -22,10 +26,9 @@ async def run_query(
     case_id: uuid.UUID,
     body: QueryRequest,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    case = await session.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await get_case_for_user(case_id, session, user)
 
     if not body.question.strip():
         raise HTTPException(status_code=422, detail="Question must not be empty")
@@ -34,7 +37,6 @@ async def run_query(
         result = await run_rag(case_id, body.question, session)
         return result
     except Exception as exc:
-        # Surface actionable errors to the UI instead of a bare 500
         msg = str(exc)
         if "OllamaUnavailable" in type(exc).__name__ or "11434" in msg or "Connection" in msg:
             raise HTTPException(

@@ -82,6 +82,13 @@ def generate(
     _num_predict = int(os.environ.get("OLLAMA_NUM_PREDICT", "300"))
     _flash_attn = os.environ.get("OLLAMA_FLASH_ATTENTION", "1") == "1"
     _num_ctx = int(os.environ.get("OLLAMA_NUM_CTX", "4096"))
+    # Determinism: temperature 0 + fixed seed. Without this, phi3:mini answers
+    # the same question differently every call — sometimes hitting the
+    # "I do not have evidence…" fallback in the system prompt even when
+    # good evidence is present. temperature=0 makes retrieval-grounded RAG
+    # answers reproducible.
+    _temperature = float(os.environ.get("OLLAMA_TEMPERATURE", "0"))
+    _seed = int(os.environ.get("OLLAMA_SEED", "42"))
 
     payload = {
         "model": model,
@@ -92,6 +99,10 @@ def generate(
             "num_predict": _num_predict,
             "num_ctx": _num_ctx,
             "flash_attention": _flash_attn,
+            "temperature": _temperature,
+            "seed": _seed,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
         },
     }
 

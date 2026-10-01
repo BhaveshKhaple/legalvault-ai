@@ -21,8 +21,9 @@ from fastapi.concurrency import run_in_threadpool
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from backend.app.auth.dependencies import get_case_for_user, get_current_user, require_role
 from backend.app.database import get_session
-from backend.app.models import Case, Chunk, Document, FileType, IngestStatus
+from backend.app.models import Case, Chunk, Document, FileType, IngestStatus, User, UserRole
 
 router = APIRouter()
 
@@ -109,10 +110,9 @@ async def upload_document(
     case_id: uuid.UUID,
     file: UploadFile,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_role(UserRole.analyst)),
 ):
-    case = await session.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await get_case_for_user(case_id, session, user)
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
@@ -187,7 +187,9 @@ async def doc_status(
     case_id: uuid.UUID,
     doc_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
+    await get_case_for_user(case_id, session, user)
     doc = await session.get(Document, doc_id)
     if not doc or doc.case_id != case_id:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -205,7 +207,9 @@ async def delete_document(
     case_id: uuid.UUID,
     doc_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_role(UserRole.analyst)),
 ):
+    await get_case_for_user(case_id, session, user)
     doc = await session.get(Document, doc_id)
     if not doc or doc.case_id != case_id:
         raise HTTPException(status_code=404, detail="Document not found")

@@ -18,8 +18,9 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from backend.app.auth.dependencies import get_case_for_user, require_role
 from backend.app.database import get_session
-from backend.app.models import Case, Document, ShieldReport
+from backend.app.models import Case, Document, ShieldReport, User, UserRole
 
 router = APIRouter()
 
@@ -33,11 +34,9 @@ async def run_shield(
     case_id: uuid.UUID,
     body: ShieldRequest,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_role(UserRole.analyst)),
 ):
-    # Verify case + document exist
-    case = await session.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await get_case_for_user(case_id, session, user)
 
     doc = await session.get(Document, body.source_doc_id)
     if not doc or doc.case_id != case_id:
