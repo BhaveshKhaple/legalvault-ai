@@ -55,7 +55,7 @@ Exits 0 on pass, 1 on fail — safe to use as a CI gate (task 9.4 picks this up)
 ## Task 10.2 — Report Shield detection
 
 **Status (mock mode):** PASS — all missing-section flaws caught (3/3 testable reports).
-**Status (real-LLM mode):** see latest run output.
+**Status (real-LLM mode):** PASS — 5/5 reports caught, 8/8 planted flaws detected (target 4/5).
 
 ### What it tests
 
@@ -86,6 +86,20 @@ Exits 0 on pass, 1 on fail — safe to use as a CI gate (task 9.4 picks this up)
 | r5 | 1/3 | 68 | PASS (section) |
 
 **Mock-mode verdict:** PASS — 3/3 missing-section testable reports caught.
+
+### Latest real-LLM run
+
+Verified against live Ollama (phi3:mini on GTX 1650, ~2 min end-to-end).
+
+| Report | Hits / Flaws | Trust | Verdict |
+|---|---|---|---|
+| r1 | 1/1 | 51 | PASS |
+| r2 | 2/2 | 23 | PASS |
+| r3 | 1/1 | 33 | PASS (contradiction caught) |
+| r4 | 1/1 | 36 | PASS (contradiction caught) |
+| r5 | 3/3 |  0 | PASS (both contradictions + missing section) |
+
+**Real-LLM verdict:** PASS — 5/5 reports caught, 8/8 planted flaws detected. Target was 4/5 reports with any detection; we got all 5, every planted flaw found. This confirms the three fixes from the previous section (shield router import, sigmoid rerank threshold, fail-safe default) actually unblock the contradiction path end-to-end — all 3 contradiction-only reports (r3, r4, r5) were caught by the verifier, which they weren't before the sigmoid fix.
 
 ### Reproducing
 
