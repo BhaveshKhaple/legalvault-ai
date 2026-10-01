@@ -1,0 +1,252 @@
+{
+  "description": "Ground-truth queries for the eval-corpus 10-document mixed-format test set. Each query has a 'must_contain' substring that the retrieved chunk + LLM answer must include; the retrieval test passes when the chunk containing that substring appears in top-K.",
+  "corpus_dir": "tests/eval/corpus",
+  "documents": [
+    {
+      "id": "d01",
+      "filename": "d01_nda_numbered.pdf",
+      "format": "pdf",
+      "structure": "numbered-clauses",
+      "expected_pages": 2,
+      "queries": [
+        {
+          "id": "d01_q1",
+          "question": "For how many years must the receiving party keep confidential information secret?",
+          "must_contain_in_chunk": "five",
+          "must_contain_in_answer": ["five", "5"]
+        },
+        {
+          "id": "d01_q2",
+          "question": "Which courts have jurisdiction over disputes under this NDA?",
+          "must_contain_in_chunk": "Pune",
+          "must_contain_in_answer": ["Pune"]
+        }
+      ]
+    },
+    {
+      "id": "d02",
+      "filename": "d02_service_agreement.pdf",
+      "format": "pdf",
+      "structure": "long-numbered-sections",
+      "expected_pages": 3,
+      "queries": [
+        {
+          "id": "d02_q1",
+          "question": "What is the monthly retainer under this service agreement?",
+          "must_contain_in_chunk": "2,50,000",
+          "must_contain_in_answer": ["2,50,000", "2.5", "Two Lakh"]
+        },
+        {
+          "id": "d02_q2",
+          "question": "What is the required system uptime per month?",
+          "must_contain_in_chunk": "99.5",
+          "must_contain_in_answer": ["99.5"]
+        },
+        {
+          "id": "d02_q3",
+          "question": "What is the notice period for either party to terminate the service agreement?",
+          "must_contain_in_chunk": "ninety",
+          "must_contain_in_answer": ["ninety", "90"]
+        }
+      ]
+    },
+    {
+      "id": "d03",
+      "filename": "d03_employment_contract.pdf",
+      "format": "pdf",
+      "structure": "prose-with-bullets",
+      "expected_pages": 2,
+      "queries": [
+        {
+          "id": "d03_q1",
+          "question": "What is the annual cost-to-company for the senior backend engineer?",
+          "must_contain_in_chunk": "24,00,000",
+          "must_contain_in_answer": ["24,00,000", "Twenty-Four Lakh"]
+        },
+        {
+          "id": "d03_q2",
+          "question": "What is the probation period in the employment contract?",
+          "must_contain_in_chunk": "six",
+          "must_contain_in_answer": ["six", "6"]
+        },
+        {
+          "id": "d03_q3",
+          "question": "What is the notice period after probation?",
+          "must_contain_in_chunk": "sixty",
+          "must_contain_in_answer": ["sixty", "60"]
+        }
+      ]
+    },
+    {
+      "id": "d04",
+      "filename": "d04_lease_deed.pdf",
+      "format": "pdf",
+      "structure": "defined-terms-heavy",
+      "expected_pages": 3,
+      "queries": [
+        {
+          "id": "d04_q1",
+          "question": "What is the monthly rent in the lease deed?",
+          "must_contain_in_chunk": "85,000",
+          "must_contain_in_answer": ["85,000", "Eighty-Five Thousand"]
+        },
+        {
+          "id": "d04_q2",
+          "question": "What is the lock-in period in the lease?",
+          "must_contain_in_chunk": "twenty-four",
+          "must_contain_in_answer": ["twenty-four", "24"]
+        },
+        {
+          "id": "d04_q3",
+          "question": "By what percentage does the rent escalate every year?",
+          "must_contain_in_chunk": "7%",
+          "must_contain_in_answer": ["7%", "7 percent", "seven"]
+        }
+      ]
+    },
+    {
+      "id": "d05",
+      "filename": "d05_privacy_policy.pdf",
+      "format": "pdf",
+      "structure": "heading-driven-no-numbering",
+      "expected_pages": 3,
+      "queries": [
+        {
+          "id": "d05_q1",
+          "question": "For how many years does Finvio retain personal information after account closure?",
+          "must_contain_in_chunk": "eight",
+          "must_contain_in_answer": ["eight", "8"]
+        },
+        {
+          "id": "d05_q2",
+          "question": "What email should I write to for a data deletion request?",
+          "must_contain_in_chunk": "privacy@finvio.in",
+          "must_contain_in_answer": ["privacy@finvio.in"]
+        }
+      ]
+    },
+    {
+      "id": "d06",
+      "filename": "d06_fee_schedule.pdf",
+      "format": "pdf",
+      "structure": "table-heavy",
+      "expected_pages": 1,
+      "queries": [
+        {
+          "id": "d06_q1",
+          "question": "What is the fee for a statutory audit of a private limited company with turnover under 50 crore?",
+          "must_contain_in_chunk": "1,25,000",
+          "must_contain_in_answer": ["1,25,000"]
+        },
+        {
+          "id": "d06_q2",
+          "question": "What is the hourly rate for partner-led advisory?",
+          "must_contain_in_chunk": "6,500",
+          "must_contain_in_answer": ["6,500"]
+        }
+      ]
+    },
+    {
+      "id": "d07",
+      "filename": "d07_meeting_minutes.txt",
+      "format": "txt",
+      "structure": "unstructured-prose",
+      "expected_pages": 1,
+      "queries": [
+        {
+          "id": "d07_q1",
+          "question": "By when must Bhavesh complete Task 6.4?",
+          "must_contain_in_chunk": "1 October",
+          "must_contain_in_answer": ["1 October", "October 1"]
+        },
+        {
+          "id": "d07_q2",
+          "question": "Why does cross-tenant case access return 404 instead of 403?",
+          "must_contain_in_chunk": "leaking case existence",
+          "must_contain_in_answer": ["leak", "existence"]
+        }
+      ]
+    },
+    {
+      "id": "d08",
+      "filename": "d08_product_spec.docx",
+      "format": "docx",
+      "structure": "headings-h1-h2-h3",
+      "expected_pages": 2,
+      "queries": [
+        {
+          "id": "d08_q1",
+          "question": "What is the p99 latency target for the first autocomplete suggestion?",
+          "must_contain_in_chunk": "150",
+          "must_contain_in_answer": ["150"]
+        },
+        {
+          "id": "d08_q2",
+          "question": "What is the target click-through rate for Autocomplete v2?",
+          "must_contain_in_chunk": "18%",
+          "must_contain_in_answer": ["18%", "18 percent"]
+        }
+      ]
+    },
+    {
+      "id": "d09",
+      "filename": "d09_faq.docx",
+      "format": "docx",
+      "structure": "q-and-a",
+      "expected_pages": 1,
+      "queries": [
+        {
+          "id": "d09_q1",
+          "question": "Does LegalVault AI send data to the cloud?",
+          "must_contain_in_chunk": "No. All processing runs on your own hardware",
+          "must_contain_in_answer": ["no", "local", "own hardware", "on-premise"]
+        },
+        {
+          "id": "d09_q2",
+          "question": "What is the minimum hardware required to run LegalVault AI?",
+          "must_contain_in_chunk": "8 GB RAM",
+          "must_contain_in_answer": ["8 GB", "i5", "20 GB"]
+        }
+      ]
+    },
+    {
+      "id": "d10",
+      "filename": "d10_bilingual_notice.pdf",
+      "format": "pdf",
+      "structure": "bilingual-english-hindi",
+      "expected_pages": 1,
+      "queries": [
+        {
+          "id": "d10_q1",
+          "question": "What was the amount of the dishonoured cheque?",
+          "must_contain_in_chunk": "2,50,000",
+          "must_contain_in_answer": ["2,50,000"]
+        },
+        {
+          "id": "d10_q2",
+          "question": "Within how many days must the addressee pay after receiving the notice?",
+          "must_contain_in_chunk": "fifteen",
+          "must_contain_in_answer": ["fifteen", "15"]
+        }
+      ]
+    }
+  ],
+  "adversarial_queries": [
+    {
+      "id": "adv_q1",
+      "question": "What is the capital of France?",
+      "expectation": "should_refuse"
+    },
+    {
+      "id": "adv_q2",
+      "question": "What is the current price of Bitcoin?",
+      "expectation": "should_refuse"
+    },
+    {
+      "id": "adv_q3",
+      "question": "What is the maternity leave policy at Lumen Software?",
+      "expectation": "should_refuse",
+      "note": "Document mentions earned leave + sick leave only; no maternity policy specified."
+    }
+  ]
+}

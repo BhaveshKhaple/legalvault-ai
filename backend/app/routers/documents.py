@@ -28,20 +28,36 @@ from backend.app.models import Case, Chunk, Document, FileType, IngestStatus, Us
 router = APIRouter()
 
 _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"}
-_ALLOWED_SUFFIXES = {".pdf"} | _AUDIO_SUFFIXES
+_TEXT_SUFFIXES = {".txt", ".docx"}
+_ALLOWED_SUFFIXES = {".pdf"} | _AUDIO_SUFFIXES | _TEXT_SUFFIXES
 
 
 # ─── sync ingestion helpers (run in thread pool) ─────────────────────────────
 
 
-def _ingest_pdf(path: str, doc_id: uuid.UUID, case_id: uuid.UUID, filename: str) -> list[dict]:
-    from backend.app.ingestion.pdf_extractor import extract_pdf
+def _ingest_text_like(path: str, doc_id: uuid.UUID, case_id: uuid.UUID, filename: str, suffix: str) -> list[dict]:
+    """Shared ingestion path for any format that yields pages of text.
+
+    Dispatches to the right extractor by suffix, then runs the same
+    chunker → embed → index pipeline as PDFs.
+    """
     from backend.app.ingestion.clause_chunker import chunk_legal_doc
     from backend.app.retrieval.embeddings import embed_batch
     from backend.app.retrieval.vector_store import insert
     from backend.app.llm.model_selector import get_model
 
-    pages = extract_pdf(path)
+    if suffix == ".pdf":
+        from backend.app.ingestion.pdf_extractor import extract_pdf
+        pages = extract_pdf(path)
+    elif suffix == ".txt":
+        from backend.app.ingestion.text_extractor import extract_text
+        pages = extract_text(path)
+    elif suffix == ".docx":
+        from backend.app.ingestion.docx_extractor import extract_docx
+        pages = extract_docx(path)
+    else:
+        raise ValueError(f"No text extractor registered for '{suffix}'")
+
     if not pages:
         return []
     chunks = chunk_legal_doc(pages)
@@ -133,6 +149,8 @@ async def upload_document(
         id=doc_id,
         case_id=case_id,
         filename=file.filename or f"document{suffix}",
+        # FileType enum currently has only pdf/audio — map .txt/.docx to pdf
+        # since they share the same text-page shape downstream.
         doc_type=FileType.audio if suffix in _AUDIO_SUFFIXES else FileType.pdf,
         storage_path=str(storage_path),
         sha256=hashlib.sha256(content).hexdigest(),
@@ -143,10 +161,14 @@ async def upload_document(
 
     # Run CPU-bound ingestion in thread pool — keeps event loop free
     try:
-        ingest_fn = _ingest_audio if suffix in _AUDIO_SUFFIXES else _ingest_pdf
-        chunks = await run_in_threadpool(
-            ingest_fn, str(storage_path), doc_id, case_id, doc.filename
-        )
+        if suffix in _AUDIO_SUFFIXES:
+            chunks = await run_in_threadpool(
+                _ingest_audio, str(storage_path), doc_id, case_id, doc.filename
+            )
+        else:
+            chunks = await run_in_threadpool(
+                _ingest_text_like, str(storage_path), doc_id, case_id, doc.filename, suffix
+            )
     except Exception as exc:
         doc.status = IngestStatus.error
         doc.error_message = str(exc)[:500]
@@ -172,9 +194,8 @@ async def upload_document(
         ))
 
     doc.status = IngestStatus.done
-    if suffix != ".pdf":
-        pass
-    else:
+    # Audio has no page concept; everything else can report distinct pages touched
+    if suffix not in _AUDIO_SUFFIXES:
         doc.page_count = len({ch.get("page") for ch in chunks if ch.get("page")})
 
     await session.commit()
