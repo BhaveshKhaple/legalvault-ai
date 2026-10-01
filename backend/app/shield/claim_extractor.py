@@ -88,6 +88,36 @@ def _extract_text_from_pdf(pdf_path: Path) -> str:
 # ─── public API ───────────────────────────────────────────────────────────────
 
 
+def extract_claims(raw_text: str) -> list[str]:
+    """Split raw report text into verifiable claims (one claim = one sentence/bullet).
+
+    Pure-text version of chunk_report() — used by shield.py router and by
+    the 10.2 eval harness. chunk_report() calls this after PDF extraction.
+    """
+    claims: list[str] = []
+    for paragraph in _split_paragraphs(raw_text):
+        para = paragraph.strip()
+        if not para:
+            continue
+        if _BULLET_RE.search(para):
+            items = _BULLET_RE.split(para)
+            for item in items:
+                item = item.strip()
+                if item:
+                    claims.append(item)
+        else:
+            claims.extend(_split_sentences(para))
+
+    seen: set[str] = set()
+    clean: list[str] = []
+    for claim in claims:
+        normalised = claim.strip()
+        if normalised and len(normalised) >= 10 and normalised not in seen:
+            seen.add(normalised)
+            clean.append(normalised)
+    return clean
+
+
 def chunk_report(pdf_path: str) -> list[str]:
     """Extract individual verifiable claims from a report PDF.
 
@@ -111,33 +141,7 @@ def chunk_report(pdf_path: str) -> list[str]:
     except Exception as exc:
         raise ValueError(f"Cannot read PDF '{path.name}': {exc}") from exc
 
-    claims: list[str] = []
-
-    for paragraph in _split_paragraphs(raw_text):
-        para = paragraph.strip()
-        if not para:
-            continue
-
-        if _BULLET_RE.search(para):
-            # Numbered/bulleted paragraph → split on bullet boundaries
-            items = _BULLET_RE.split(para)
-            for item in items:
-                item = item.strip()
-                if item:
-                    claims.append(item)
-        else:
-            # Prose paragraph → sentence-level split
-            claims.extend(_split_sentences(para))
-
-    # Deduplicate while preserving order, filter noise
-    seen: set[str] = set()
-    clean: list[str] = []
-    for claim in claims:
-        normalised = claim.strip()
-        if normalised and len(normalised) >= 10 and normalised not in seen:
-            seen.add(normalised)
-            clean.append(normalised)
-
+    clean = extract_claims(raw_text)
     logger.info(
         "chunk_report: extracted %d claims from '%s'.",
         len(clean),

@@ -77,8 +77,11 @@ def _llm_support_or_contradict(claim: str, evidence_texts: list[str], llm_model:
             return "Contradicted"
         return "Verified"
     except Exception as exc:
-        logger.warning("LLM call failed in verifier: %s — defaulting to Verified", exc)
-        return "Verified"
+        # Fail-safe for a legal tool: NEVER falsely vouch for a claim.
+        # If the LLM is unreachable, mark as Unverified so the user knows
+        # the verifier couldn't actually judge it.
+        logger.warning("LLM call failed in verifier: %s — marking Unverified", exc)
+        return "Unverified"
 
 
 def verify_claim(claim: str, case_id: str) -> dict:
@@ -117,7 +120,12 @@ def verify_claim(claim: str, case_id: str) -> dict:
     if not top:
         return {"claim": claim, "status": "Unverified", "evidence": []}
 
-    best_score = float(top[0].get("rerank_score", top[0].get("score", 0)))
+    # ms-marco-MiniLM-L-6-v2 returns raw logits (range ~-10 to +10). Even
+    # strongly-relevant chunks often score near 0. Compare on sigmoid-normalized
+    # [0,1] space instead so _RELEVANCE_THRESHOLD matches a probability.
+    import math as _math
+    best_raw = float(top[0].get("rerank_score", top[0].get("score", 0)))
+    best_score = 1.0 / (1.0 + _math.exp(-best_raw))
 
     if best_score < _RELEVANCE_THRESHOLD:
         return {"claim": claim, "status": "Unverified", "evidence": []}
@@ -129,11 +137,13 @@ def verify_claim(claim: str, case_id: str) -> dict:
     ]
     verdict: Verdict = _llm_support_or_contradict(claim, evidence_texts, _get_llm_model())
 
-    # 4. Format evidence for the caller
+    # 4. Format evidence for the caller — sigmoid-normalize scores to [0,1]
+    def _sigmoid(x):
+        return 1.0 / (1.0 + _math.exp(-float(x)))
     evidence_out = [
         {
             "content": (c.get("payload", {}) or {}).get("content", ""),
-            "score": float(c.get("rerank_score", c.get("score", 0))),
+            "score": _sigmoid(c.get("rerank_score", c.get("score", 0))),
             "page": (c.get("payload", {}) or {}).get("page"),
             "filename": (c.get("payload", {}) or {}).get("filename"),
             "section_title": (c.get("payload", {}) or {}).get("section_title"),
