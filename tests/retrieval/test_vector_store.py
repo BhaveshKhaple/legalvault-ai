@@ -6,11 +6,16 @@ Case isolation (Task 2.3) is explicitly tested: queries for case A must
 never return results tagged case B.
 """
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import pytest
 
 import backend.app.retrieval.vector_store as vs_module
-from backend.app.retrieval.vector_store import insert, query, delete_by_doc
+from backend.app.retrieval.vector_store import (
+    COLLECTION_E5,
+    insert,
+    query,
+    delete_by_doc,
+)
 
 
 # ─── fixtures ─────────────────────────────────────────────────────────────────
@@ -25,14 +30,20 @@ def reset_client():
     vs_module._client = original
 
 
-def _fake_client():
-    """Build a mock QdrantClient that passes all basic sanity checks."""
+def _fake_client(existing_collections: list[str] = None):
+    """Build a mock QdrantClient that reports the given collections as existing."""
     client = MagicMock()
-    client.get_collections.return_value.collections = []
+    # _ensure_collection and delete_by_doc call get_collections() to check existence
+    coll_objects = []
+    for name in (existing_collections or []):
+        c = MagicMock()
+        c.name = name
+        coll_objects.append(c)
+    client.get_collections.return_value.collections = coll_objects
     return client
 
 
-def _make_vec(val: float = 0.1, size: int = 1024) -> list[float]:
+def _make_vec(val: float = 0.1, size: int = 384) -> list[float]:
     return [val] * size
 
 
@@ -100,7 +111,7 @@ class TestInsert:
             insert([_make_vec()], [{"case_id": "cA", "doc_id": "d1"}])
         assert client.upsert.call_count == 1
         call_kwargs = client.upsert.call_args
-        assert call_kwargs.kwargs["collection_name"] == "legalvault_chunks"
+        assert call_kwargs.kwargs["collection_name"] == COLLECTION_E5
 
 
 # ─── query ────────────────────────────────────────────────────────────────────
@@ -115,14 +126,22 @@ def _query_response(hits: list) -> MagicMock:
 
 class TestQuery:
     def test_returns_list(self):
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             result = query(_make_vec(), case_id="cA")
         assert result == []
 
+    def test_missing_collection_returns_empty(self):
+        """If collection doesn't exist yet, return [] without crashing."""
+        client = _fake_client([])  # no collections exist
+        with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
+            result = query(_make_vec(), case_id="cA")
+        assert result == []
+        assert client.query_points.call_count == 0  # must not call Qdrant
+
     def test_result_dict_shape(self):
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.query_points.return_value = _query_response([
             _hit("abc-123", 0.92, {"case_id": "cA", "content": "penalty clause"}),
         ])
@@ -137,9 +156,9 @@ class TestQuery:
 
     def test_case_filter_passed_to_client(self):
         """SECURITY: case_id filter must always be sent to the server."""
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_client.models import Filter
 
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             query(_make_vec(), case_id="secret_case_B")
@@ -153,7 +172,7 @@ class TestQuery:
 
     def test_case_a_results_never_from_case_b(self):
         """Task 2.3 isolation: a query for case A must only show case A results."""
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.query_points.return_value = _query_response([
             _hit("id-1", 0.9, {"case_id": "case_A", "content": "A doc"}),
         ])
@@ -163,14 +182,14 @@ class TestQuery:
             assert r["payload"]["case_id"] == "case_A"
 
     def test_top_k_passed(self):
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             query(_make_vec(), case_id="cA", top_k=5)
         assert client.query_points.call_args.kwargs["limit"] == 5
 
     def test_empty_result_returns_empty_list(self):
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.query_points.return_value = _query_response([])
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
             assert query(_make_vec(), case_id="cA") == []
@@ -181,17 +200,27 @@ class TestQuery:
 
 class TestDeleteByDoc:
     def test_delete_called(self):
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.count.return_value = MagicMock(count=3)
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
-            delete_by_doc("doc_xyz")
+            delete_by_doc("doc_xyz", collection_name=COLLECTION_E5)
         assert client.delete.call_count == 1
         call_kwargs = client.delete.call_args.kwargs
-        assert call_kwargs["collection_name"] == "legalvault_chunks"
+        assert call_kwargs["collection_name"] == COLLECTION_E5
 
     def test_returns_deleted_count(self):
-        client = _fake_client()
+        client = _fake_client([COLLECTION_E5])
         client.count.return_value = MagicMock(count=7)
         with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
-            n = delete_by_doc("doc_to_remove")
+            n = delete_by_doc("doc_to_remove", collection_name=COLLECTION_E5)
         assert n == 7
+
+    def test_delete_all_collections_when_none_specified(self):
+        """delete_by_doc(doc_id) with no collection_name scans both collections."""
+        client = _fake_client([COLLECTION_E5, "legalvault_bge"])
+        client.count.return_value = MagicMock(count=2)
+        with patch("backend.app.retrieval.vector_store._get_client", return_value=client):
+            n = delete_by_doc("doc_multi")
+        # count called once per collection, delete called for each with non-zero count
+        assert client.count.call_count == 2
+        assert n == 4  # 2 per collection × 2 collections
