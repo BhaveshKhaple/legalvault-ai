@@ -1,0 +1,65 @@
+{
+  "description": "Task 10.2 — Report Shield evaluation set. 5 synthetic reports, each with deliberately planted flaws. Shield passes if it detects >=4/5 planted flaws.",
+  "source_corpus": [
+    {"id": "s01", "doc_id": "service_master", "page": 4, "content": "The Service Provider shall invoice the Client monthly. All invoices are payable within thirty (30) days of invoice date, failing which late payment interest accrues at 2% per month."},
+    {"id": "s02", "doc_id": "service_master", "page": 6, "content": "Either party may terminate this Agreement for convenience by giving ninety (90) days written notice to the other party. No termination fees are payable in such case."},
+    {"id": "s03", "doc_id": "service_master", "page": 9, "content": "The maximum aggregate liability of the Service Provider under this Agreement shall not exceed the total fees paid by the Client in the twelve (12) months preceding the claim event."},
+    {"id": "s04", "doc_id": "service_master", "page": 12, "content": "This Agreement shall be governed by the laws of India. The courts at Mumbai shall have exclusive jurisdiction over any disputes."},
+    {"id": "s05", "doc_id": "employment_master", "page": 2, "content": "The Employee shall receive an annual gross salary of Rs. 18,00,000 payable in twelve equal monthly instalments."},
+    {"id": "s06", "doc_id": "employment_master", "page": 4, "content": "After confirmation of employment, either party may terminate the engagement by giving ninety (90) days written notice or payment in lieu thereof."},
+    {"id": "s07", "doc_id": "employment_master", "page": 5, "content": "The Employee shall not directly or indirectly engage in any business that competes with the Company within India for a period of twelve (12) months after termination of employment."},
+    {"id": "s08", "doc_id": "lease_master", "page": 3, "content": "The monthly rent payable by the Tenant shall be Rs. 2,40,000 exclusive of maintenance charges, electricity and water."},
+    {"id": "s09", "doc_id": "lease_master", "page": 5, "content": "This lease is for a period of thirty-six (36) months commencing from 1 June 2026."},
+    {"id": "s10", "doc_id": "lease_master", "page": 7, "content": "The monthly rent shall be subject to an annual escalation of five percent (5%) over the previous year rent, effective on each anniversary of the commencement date."}
+  ],
+  "reports": [
+    {
+      "id": "r1",
+      "name": "Contract missing indemnity clause",
+      "doc_type": "contract",
+      "text": "SERVICE AGREEMENT SUMMARY REPORT\n\n1. Parties. This Agreement is between Alpha Technologies and Beta Consulting.\n\n2. Definitions. Services means the deliverables defined in Annexure A.\n\n3. Scope of Work. The Service Provider shall deliver the Loan Origination System module as per the agreed timeline.\n\n4. Payment Terms. Fees are payable within thirty (30) days of invoice date.\n\n5. Term and Duration. The Agreement runs for twenty-four months from the Effective Date.\n\n6. Termination. Either party may terminate for convenience with ninety (90) days written notice.\n\n7. Confidentiality. All non-public information disclosed shall be kept confidential by both parties.\n\n8. Governing Law. This Agreement is governed by the laws of India. Mumbai courts have jurisdiction.\n\n9. Dispute Resolution. Disputes shall be referred to arbitration under the Arbitration and Conciliation Act, 1996.\n\n10. Limitation of Liability. Maximum liability is capped at twelve months of fees.\n\n11. Force Majeure. Acts of God, pandemic and war relieve both parties of obligations.",
+      "planted_flaws": [
+        {"type": "missing_section", "section": "Indemnity"}
+      ]
+    },
+    {
+      "id": "r2",
+      "name": "Agreement missing governing law + signatures",
+      "doc_type": "agreement",
+      "text": "DRAFT AGREEMENT SUMMARY\n\nParties: X Pvt Ltd and Y Pvt Ltd.\n\nPurpose and Background: The parties wish to collaborate on a joint research initiative.\n\nObligations: Each party shall contribute resources, personnel and intellectual property as agreed.\n\nRepresentations and Warranties: Each party represents that it has the authority to enter into this Agreement.\n\nConfidentiality: All proprietary information exchanged shall remain confidential during and after the engagement.\n\nIntellectual Property: All IP created jointly shall be owned jointly by both parties.\n\nTerm: The Agreement commences on 1 July 2026 and continues for 24 months.\n\nTermination: Either party may terminate with 60 days notice.",
+      "planted_flaws": [
+        {"type": "missing_section", "section": "Governing Law"},
+        {"type": "missing_section", "section": "Signatures"}
+      ]
+    },
+    {
+      "id": "r3",
+      "name": "Report with contradictory payment terms",
+      "doc_type": "contract",
+      "text": "PAYMENT TERMS SUMMARY\n\n1. Parties. Alpha Technologies and Beta Consulting LLP.\n\n2. Definitions. Services means the deliverables defined in Annexure A.\n\n3. Scope of Work. Software development on a time-and-materials basis.\n\n4. Payment Terms. The Client shall pay all invoices within sixty (60) days of invoice date. No late payment interest applies.\n\n5. Term. 24 months from Effective Date.\n\n6. Termination. 60 days notice for convenience.\n\n7. Confidentiality. Standard confidentiality terms apply.\n\n8. Indemnity. Each party shall indemnify the other for third-party IP claims.\n\n9. Governing Law. Mumbai courts, India jurisdiction.\n\n10. Dispute Resolution. Arbitration under Arbitration and Conciliation Act 1996.\n\n11. Limitation of Liability. Liability capped at 12 months fees.\n\n12. Force Majeure. Acts of God relieve obligations.",
+      "planted_flaws": [
+        {"type": "contradiction", "about": "payment terms", "note": "source says 30 days + 2% late interest, report says 60 days + no interest"}
+      ]
+    },
+    {
+      "id": "r4",
+      "name": "Report with unverified claim about currency",
+      "doc_type": "agreement",
+      "text": "EMPLOYMENT COMPENSATION REPORT\n\n1. Parties: Alpha Technologies and the Employee.\n\n2. Purpose and Background: Senior Software Engineer position.\n\n3. Obligations: Employee shall perform duties assigned by Director of Engineering.\n\n4. Representations and Warranties: Employee is legally entitled to work in India.\n\n5. Confidentiality: Standard proprietary information clause.\n\n6. Intellectual Property: Company owns all work product.\n\n7. Compensation: The Employee shall receive annual gross salary of USD 50,000 payable in twelve monthly instalments.\n\n8. Term: Permanent subject to probation.\n\n9. Termination: 90 days notice after confirmation.\n\n10. Non-Compete: 12 months non-compete within India.\n\n11. Governing Law: Laws of India, Mumbai courts.\n\n12. Signatures: Signed by both parties on 1 May 2026.",
+      "planted_flaws": [
+        {"type": "contradiction", "about": "salary currency", "note": "source says Rs. 18,00,000, report says USD 50,000"}
+      ]
+    },
+    {
+      "id": "r5",
+      "name": "Lease report missing lock-in + contradicting rent escalation",
+      "doc_type": "contract",
+      "text": "LEASE SUMMARY REPORT\n\n1. Parties. Landlord: Prestige Estates. Tenant: Alpha Technologies.\n\n2. Definitions. Premises means the office space on the 5th floor.\n\n3. Scope of Work. Lease of commercial office space.\n\n4. Payment Terms. Monthly rent of Rs. 2,40,000 payable in advance.\n\n5. Term and Duration. 36 months from 1 June 2026.\n\n6. Termination. The Tenant may terminate at any time with 30 days notice. No lock-in restriction applies.\n\n7. Confidentiality. Standard confidentiality terms apply.\n\n8. Governing Law. Laws of India, Bangalore courts have jurisdiction.\n\n9. Dispute Resolution. Arbitration under Indian Arbitration Act.\n\n10. Limitation of Liability. Standard limitation applies.\n\n11. Force Majeure. Acts of God relieve obligations.\n\nAnnual rent escalation shall be ten percent (10%) over the previous year rent.",
+      "planted_flaws": [
+        {"type": "contradiction", "about": "lock-in period", "note": "source says 18-month lock-in, report says no lock-in"},
+        {"type": "contradiction", "about": "rent escalation rate", "note": "source says 5%, report says 10%"},
+        {"type": "missing_section", "section": "Indemnity"}
+      ]
+    }
+  ]
+}

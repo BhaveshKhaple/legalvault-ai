@@ -76,9 +76,10 @@ class TestVerifyClaim:
         assert result["evidence"] == []
 
     def test_unverified_when_score_below_threshold(self, monkeypatch):
+        # Threshold is 0.3 on sigmoid-normalized score. sigmoid(-5) ≈ 0.007 — below 0.3.
         monkeypatch.setattr(
             "backend.app.shield.verifier._rerank_evidence",
-            lambda q, candidates, k=3: [{**c, "rerank_score": 0.1} for c in candidates[:k]],
+            lambda q, candidates, k=3: [{**c, "rerank_score": -5.0} for c in candidates[:k]],
         )
         result = verify_claim("Penalty is 2% per month.", "case-123")
         assert result["status"] == "Unverified"
