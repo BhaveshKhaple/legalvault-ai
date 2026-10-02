@@ -90,10 +90,16 @@ def generate(
     _temperature = float(os.environ.get("OLLAMA_TEMPERATURE", "0"))
     _seed = int(os.environ.get("OLLAMA_SEED", "42"))
 
+    # keep_alive: how long Ollama keeps the model in VRAM after the request.
+    # Default is 5 minutes — on a 4GB VRAM card idle pressure evicts quickly.
+    # "24h" keeps phi3:mini warm across the whole working session.
+    _keep_alive = os.environ.get("OLLAMA_KEEP_ALIVE", "24h")
+
     payload = {
         "model": model,
         "prompt": full_prompt,
         "stream": False,
+        "keep_alive": _keep_alive,
         "options": {
             "num_gpu": _num_gpu,
             "num_predict": _num_predict,
