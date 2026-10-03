@@ -45,8 +45,39 @@ async def get_session():
         yield session
 
 
+def _sync_create_and_migrate(connection):
+    SQLModel.metadata.create_all(connection)
+    if connection.dialect.name == "sqlite":
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(connection)
+        for table_name, table in SQLModel.metadata.tables.items():
+            if inspector.has_table(table_name):
+                existing_cols = {col["name"] for col in inspector.get_columns(table_name)}
+                for col in table.columns:
+                    if col.name not in existing_cols:
+                        col_type = col.type.compile(connection.dialect)
+                        default_clause = ""
+                        if col.default is not None and col.default.is_scalar:
+                            val = col.default.arg
+                            if isinstance(val, str):
+                                default_clause = f" DEFAULT '{val}'"
+                            elif isinstance(val, bool):
+                                default_clause = f" DEFAULT {1 if val else 0}"
+                            elif isinstance(val, (int, float)):
+                                default_clause = f" DEFAULT {val}"
+                        elif col.server_default is not None:
+                            val = getattr(col.server_default, "arg", None)
+                            if val is not None:
+                                default_clause = f" DEFAULT {val}"
+                        connection.execute(
+                            text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}{default_clause}")
+                        )
+
+
 async def create_db_and_tables():
     """Create all tables on startup (dev mode — prod uses Alembic)."""
     Path("./data/documents").mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(_sync_create_and_migrate)
+

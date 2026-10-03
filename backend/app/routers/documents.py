@@ -1,15 +1,18 @@
 """
 Task 6.2 — Document upload endpoint with synchronous ingestion pipeline.
+embedding-dispatcher — At ingestion time, the dispatcher decides whether
+to use e5-small-v2 (384-dim → legalvault_e5) or BGE-M3 (1024-dim →
+legalvault_bge). The decision is stored on the Document record so the
+RAG service can fan-out to the right collection(s) at query time.
 
-Upload flow (synchronous for local dev — ARQ queue added in Task 9.3):
-  1. Receive PDF or audio via multipart POST
+Upload flow:
+  1. Receive PDF / TXT / DOCX / audio via multipart POST
   2. Save to data/documents/<doc_id>.<ext>
-  3. Extract text (pdf_extractor) or transcribe (whisper)
-  4. Chunk into clauses (clause_chunker)
-  5. Embed chunks using the active tier's embedding model
-  6. Insert vectors + payloads to Qdrant (case_id for tenant isolation)
-  7. Persist Chunk records to SQLite (BM25 corpus at query time)
-  8. Update Document status → done
+  3. Extract text (extractor by suffix) or transcribe (whisper)
+  4. Run dispatcher → routing decision (e5_small | bge_m3)
+  5. Embed with the chosen model, insert into the matching Qdrant collection
+  6. Persist Chunk records to SQLite (BM25 corpus at query time)
+  7. Stamp embedding_tier + qdrant_collection on Document, set status → done
 """
 
 import hashlib
@@ -39,48 +42,54 @@ from backend.app.models import (
 router = APIRouter()
 
 _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"}
-_ALLOWED_SUFFIXES = {".pdf", ".docx"} | _AUDIO_SUFFIXES
+_TEXT_SUFFIXES = {".txt", ".docx"}
+_ALLOWED_SUFFIXES = {".pdf"} | _AUDIO_SUFFIXES | _TEXT_SUFFIXES
 
 
 # ─── sync ingestion helpers (run in thread pool) ─────────────────────────────
 
 
-def _ingest_pdf(
-    path: str, doc_id: uuid.UUID, case_id: uuid.UUID, filename: str
-) -> list[dict]:
-    import logging
-    from backend.app.ingestion.pdf_extractor import extract_pdf
-    from backend.app.ingestion.docling_extractor import extract_docling
+def _ingest_text_like(
+    path: str,
+    doc_id: uuid.UUID,
+    case_id: uuid.UUID,
+    filename: str,
+    suffix: str,
+) -> tuple[list[dict], str, str]:
+    """Extract, chunk, dispatch, embed, index a text-format document.
+
+    Returns:
+        (chunks, qdrant_collection, embedding_tier)
+    """
     from backend.app.ingestion.clause_chunker import chunk_legal_doc
+    from backend.app.ingestion.embedding_dispatcher import dispatch
     from backend.app.retrieval.embeddings import embed_batch
     from backend.app.retrieval.vector_store import insert
-    from backend.app.llm.model_selector import get_model
 
-    logger = logging.getLogger(__name__)
-
-    try:
-        pages = extract_docling(path)
-    except RuntimeError:
-        logger.warning(f"Docling: scanned image '{filename}', falling back to PyMuPDF")
+    if suffix == ".pdf":
+        from backend.app.ingestion.pdf_extractor import extract_pdf
         pages = extract_pdf(path)
-    except Exception as exc:
-        if "DocumentConversionError" in type(exc).__name__:
-            logger.warning(
-                f"Docling conversion failed for '{filename}', falling back: {exc}"
-            )
-            pages = extract_pdf(path)
-        else:
-            # Re-raise if it's some other unexpected error
-            raise
+    elif suffix == ".txt":
+        from backend.app.ingestion.text_extractor import extract_text
+        pages = extract_text(path)
+    elif suffix == ".docx":
+        from backend.app.ingestion.docx_extractor import extract_docx
+        pages = extract_docx(path)
+    else:
+        raise ValueError(f"No text extractor registered for '{suffix}'")
 
     if not pages:
-        return []
+        return [], "legalvault_e5", "e5_small"
+
+    # ── embedding dispatcher ──────────────────────────────────────────────────
+    decision = dispatch(file_path=path, pages=pages)
+
     chunks = chunk_legal_doc(pages)
     if not chunks:
-        return []
+        return [], decision.collection_name, decision.tier
 
     texts = [ch["content"] for ch in chunks]
-    vectors = embed_batch(texts, model_name=get_model().embedding)
+    vectors = embed_batch(texts, model_name=decision.model_name)
     payloads = [
         {
             "case_id": str(case_id),
@@ -89,22 +98,27 @@ def _ingest_pdf(
             "content": ch["content"],
             "page": ch.get("page"),
             "section_title": ch.get("section_title"),
+            "embedding_tier": decision.tier,
         }
         for ch in chunks
     ]
-    qdrant_ids = insert(vectors, payloads)
+    qdrant_ids = insert(vectors, payloads, collection_name=decision.collection_name)
     for ch, qid in zip(chunks, qdrant_ids):
         ch["qdrant_id"] = qid
-    return chunks
+
+    return chunks, decision.collection_name, decision.tier
 
 
 def _ingest_audio(
-    path: str, doc_id: uuid.UUID, case_id: uuid.UUID, filename: str
-) -> list[dict]:
+    path: str,
+    doc_id: uuid.UUID,
+    case_id: uuid.UUID,
+    filename: str,
+) -> tuple[list[dict], str, str]:
+    """Transcribe + embed audio. Always uses e5-small-v2 (audio is always English-first)."""
     from backend.app.ingestion.audio_transcriber import transcribe_audio
     from backend.app.retrieval.embeddings import embed_batch
-    from backend.app.retrieval.vector_store import insert
-    from backend.app.llm.model_selector import get_model
+    from backend.app.retrieval.vector_store import COLLECTION_E5, insert
 
     segments = transcribe_audio(path)
     chunks = [
@@ -115,14 +129,13 @@ def _ingest_audio(
             "page": None,
             "section_title": None,
         }
-        for s in segments
-        if s.get("text", "").strip()
+        for s in segments if s.get("text", "").strip()
     ]
     if not chunks:
-        return []
+        return [], COLLECTION_E5, "e5_small"
 
     texts = [ch["content"] for ch in chunks]
-    vectors = embed_batch(texts, model_name=get_model().embedding)
+    vectors = embed_batch(texts, model_name="intfloat/e5-small-v2")
     payloads = [
         {
             "case_id": str(case_id),
@@ -132,13 +145,15 @@ def _ingest_audio(
             "ts_start": ch.get("ts_start"),
             "page": None,
             "section_title": None,
+            "embedding_tier": "e5_small",
         }
         for ch in chunks
     ]
-    qdrant_ids = insert(vectors, payloads)
+    qdrant_ids = insert(vectors, payloads, collection_name=COLLECTION_E5)
     for ch, qid in zip(chunks, qdrant_ids):
         ch["qdrant_id"] = qid
-    return chunks
+
+    return chunks, COLLECTION_E5, "e5_small"
 
 
 # ─── endpoints ───────────────────────────────────────────────────────────────
@@ -157,7 +172,7 @@ async def upload_document(
     if suffix not in _ALLOWED_SUFFIXES:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported file type '{suffix}'. Allowed: PDF and audio files.",
+            detail=f"Unsupported file type '{suffix}'. Allowed: PDF, TXT, DOCX, and audio files.",
         )
 
     content = await file.read()
@@ -172,6 +187,8 @@ async def upload_document(
         id=doc_id,
         case_id=case_id,
         filename=file.filename or f"document{suffix}",
+        # FileType enum currently has only pdf/audio — map .txt/.docx to pdf
+        # since they share the same text-page shape downstream.
         doc_type=FileType.audio if suffix in _AUDIO_SUFFIXES else FileType.pdf,
         storage_path=str(storage_path),
         sha256=hashlib.sha256(content).hexdigest(),
@@ -180,19 +197,21 @@ async def upload_document(
     session.add(doc)
     await session.commit()
 
-    # Run CPU-bound ingestion in thread pool — keeps event loop free
     try:
-        ingest_fn = _ingest_audio if suffix in _AUDIO_SUFFIXES else _ingest_pdf
-        chunks = await run_in_threadpool(
-            ingest_fn, str(storage_path), doc_id, case_id, doc.filename
-        )
+        if suffix in _AUDIO_SUFFIXES:
+            chunks, qdrant_coll, emb_tier = await run_in_threadpool(
+                _ingest_audio, str(storage_path), doc_id, case_id, doc.filename
+            )
+        else:
+            chunks, qdrant_coll, emb_tier = await run_in_threadpool(
+                _ingest_text_like, str(storage_path), doc_id, case_id, doc.filename, suffix
+            )
     except Exception as exc:
         doc.status = IngestStatus.error
         doc.error_message = str(exc)[:500]
         await session.commit()
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
 
-    # Persist chunk records for BM25 rebuild at query time
     for i, ch in enumerate(chunks):
         qdrant_uuid = None
         try:
@@ -213,9 +232,9 @@ async def upload_document(
         )
 
     doc.status = IngestStatus.done
-    if suffix in _AUDIO_SUFFIXES:
-        pass
-    else:
+    doc.qdrant_collection = qdrant_coll
+    doc.embedding_tier = emb_tier
+    if suffix not in _AUDIO_SUFFIXES:
         doc.page_count = len({ch.get("page") for ch in chunks if ch.get("page")})
 
     await session.commit()
@@ -224,6 +243,8 @@ async def upload_document(
         "filename": doc.filename,
         "chunk_count": len(chunks),
         "status": "done",
+        "embedding_tier": emb_tier,
+        "qdrant_collection": qdrant_coll,
     }
 
 
@@ -243,6 +264,8 @@ async def doc_status(
         "document_id": str(doc_id),
         "status": doc.status,
         "chunk_count": len(chunks_result.all()),
+        "embedding_tier": doc.embedding_tier,
+        "qdrant_collection": doc.qdrant_collection,
         "error": doc.error_message,
     }
 
@@ -262,8 +285,9 @@ async def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
 
     from backend.app.retrieval.vector_store import delete_by_doc
-
-    removed = await run_in_threadpool(delete_by_doc, str(doc_id))
+    # Pass the specific collection so we don't scan both unnecessarily
+    coll = getattr(doc, "qdrant_collection", None)
+    removed = await run_in_threadpool(delete_by_doc, str(doc_id), coll)
 
     Path(doc.storage_path).unlink(missing_ok=True)
     await session.delete(doc)

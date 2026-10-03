@@ -1,0 +1,60 @@
+MEETING MINUTES
+Project: LegalVault AI
+Date: 25 September 2026
+Time: 11:00 AM – 12:30 PM IST
+Venue: Conference Room, MIT Pune / Google Meet hybrid
+
+Attendees
+---------
+Bhavesh Khaple (Lead), Shubham (Backend), Vijay (Frontend), Tejas (QA),
+Prof. S. D. Sanap (Faculty Advisor)
+
+Agenda
+------
+1. Review Module 6 (Backend API) completion status
+2. Decide on authentication approach for Module 6.4
+3. Plan Module 7 (Frontend) kickoff
+4. Discuss evaluation methodology for Module 10
+
+Discussion
+----------
+Bhavesh walked the team through the current demo. The RAG pipeline is
+functioning end-to-end on his GTX 1650 setup using Phi-3 Mini and the
+e5-small-v2 embedding model. Response latency is approximately 23 seconds
+warm, which the team agreed is acceptable for the demo but needs
+optimisation before deployment.
+
+Shubham raised concerns about the lack of multi-tenancy. Prof. Sanap
+emphasised that any legal tool must enforce strict case isolation. The
+team agreed to prioritise Task 6.4 (Auth + JWT) in the next sprint.
+
+Vijay confirmed that the HTML prototype covers the demo requirements.
+The team deferred the SvelteKit migration (Tasks 7.1 to 7.4) until after
+the first end-user evaluation.
+
+Tejas raised the question of how to evaluate retrieval accuracy
+objectively. Bhavesh proposed building a synthetic corpus with
+hand-labelled queries, which the team supported.
+
+Action Items
+------------
+AI-1  Bhavesh      Complete Task 6.4 (Auth + JWT) by 1 October 2026
+AI-2  Shubham      Review Task 6.4 PR within 48 hours of submission
+AI-3  Vijay        Submit a PR to retarget AI-Vijay:adding-my-code to v1
+AI-4  Tejas        Draft 20 hand-labelled queries for retrieval eval by 5 October
+AI-5  Prof. Sanap  Share real redacted contract samples for pilot test (optional)
+
+Decisions
+---------
+D-1  JWT-based authentication selected over session cookies. Rationale:
+     stateless, works across the mobile client if we ever ship one.
+
+D-2  First user to register becomes admin automatically. Subsequent users
+     are analysts. Role promotion only via DB write for now.
+
+D-3  Cross-tenant case access returns 404, not 403, to avoid leaking case
+     existence to unauthorised users.
+
+Next Meeting
+------------
+2 October 2026 at 11:00 AM IST.

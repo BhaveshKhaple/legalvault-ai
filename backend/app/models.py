@@ -111,6 +111,12 @@ class Document(SQLModel, table=True):
     sha256: str = Field(max_length=64, index=True)
     status: IngestStatus = Field(default=IngestStatus.pending)
     error_message: Optional[str] = Field(default=None)
+    # embedding-dispatcher: which Qdrant collection holds this doc's vectors.
+    # "legalvault_e5" (default) or "legalvault_bge". Needed at query time for
+    # fan-out: RAG service reads this to build the vectors_by_collection map.
+    qdrant_collection: str = Field(default="legalvault_e5", max_length=50)
+    # Human-readable dispatcher decision ("e5_small" | "bge_m3")
+    embedding_tier: str = Field(default="e5_small", max_length=20)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

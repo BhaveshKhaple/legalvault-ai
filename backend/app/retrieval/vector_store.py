@@ -1,18 +1,21 @@
 """
 Task 2.2 — Qdrant vector store (embedded mode) + Task 2.3 case isolation.
+embedding-dispatcher — Extended to support two named collections:
 
-Qdrant runs INSIDE the Python process (no separate Docker container) and
-persists vectors to disk at QDRANT_PATH. The same QdrantClient instance is
-reused across calls via a module-level singleton.
+    legalvault_e5   (384-dim)  — intfloat/e5-small-v2
+    legalvault_bge  (1024-dim) — BAAI/bge-m3
 
-Security (Task 2.3 requirement):
+Each collection is created on first use. The public API takes an optional
+`collection_name` parameter. Legacy callers that omit it get the e5 collection
+(default tier = e5-small-v2, same as before the dispatcher).
+
+Security (Task 2.3):
     Every vector is tagged with case_id at insert time. Every query MUST
     include a case_id filter — server-side, never trust-the-client.
     Lawyer A's documents must never appear in Lawyer B's results, even if
     the query text perfectly matches.
 
-Vector dimension: 1024 (matches BGE-M3 embed() output from Task 2.1).
-Distance metric: Cosine (equivalent to dot-product on L2-normalised vecs).
+Distance metric: Cosine on all collections.
 """
 
 import logging
@@ -21,11 +24,19 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from backend.app.llm.model_selector import get_model
-
 logger = logging.getLogger(__name__)
 
-_COLLECTION = "legalvault_chunks"
+# Collection names — one per embedding tier
+COLLECTION_E5 = "legalvault_e5"
+COLLECTION_BGE = "legalvault_bge"
+
+_COLLECTION_DIMS = {
+    COLLECTION_E5: 384,
+    COLLECTION_BGE: 1024,
+}
+
+# Default collection (backwards-compatible with code that doesn't pass collection_name)
+_DEFAULT_COLLECTION = COLLECTION_E5
 
 # Module-level singleton — one client for the process lifetime.
 _client: Any = None
@@ -35,30 +46,40 @@ def _get_client() -> Any:
     """Return the cached QdrantClient, creating it on first call."""
     global _client
     if _client is None:
-        from qdrant_client import QdrantClient  # noqa: PLC0415
+        from qdrant_client import QdrantClient
 
         qdrant_path = os.environ.get("QDRANT_PATH", "./data/qdrant")
         Path(qdrant_path).mkdir(parents=True, exist_ok=True)
         logger.info("Opening embedded Qdrant at '%s'.", qdrant_path)
         _client = QdrantClient(path=qdrant_path)
-        _ensure_collection(_client)
     return _client
 
 
-def _ensure_collection(client: Any) -> None:
-    """Create the collection if it doesn't exist yet."""
-    from qdrant_client.models import Distance, VectorParams  # noqa: PLC0415
+def _ensure_collection(client: Any, collection_name: str) -> None:
+    """Create a collection if it doesn't exist yet."""
+    from qdrant_client.models import Distance, VectorParams
 
-    vector_size = get_model().embedding_dim
-    existing = {c.name for c in client.get_collections().collections}
-    if _COLLECTION not in existing:
-        client.create_collection(
-            collection_name=_COLLECTION,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+    dim = _COLLECTION_DIMS.get(collection_name)
+    if dim is None:
+        raise ValueError(
+            f"Unknown collection '{collection_name}'. "
+            f"Valid: {list(_COLLECTION_DIMS.keys())}"
         )
-        logger.info("Created Qdrant collection '%s' (dim=%d).", _COLLECTION, vector_size)
+    existing = {c.name for c in client.get_collections().collections}
+    if collection_name not in existing:
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+        )
+        logger.info("Created Qdrant collection '%s' (dim=%d).", collection_name, dim)
     else:
-        logger.debug("Qdrant collection '%s' already exists.", _COLLECTION)
+        logger.debug("Qdrant collection '%s' already exists.", collection_name)
+
+
+def _get_or_create(collection_name: str) -> Any:
+    client = _get_client()
+    _ensure_collection(client, collection_name)
+    return client
 
 
 # ─── public API ───────────────────────────────────────────────────────────────
@@ -67,29 +88,21 @@ def _ensure_collection(client: Any) -> None:
 def insert(
     vectors: list[list[float]],
     payloads: list[dict],
+    collection_name: str = _DEFAULT_COLLECTION,
 ) -> list[str]:
-    """Insert vectors into Qdrant with associated metadata payloads.
+    """Insert vectors into a Qdrant collection.
 
     Each payload MUST contain 'case_id' (str) and 'doc_id' (str).
-    The payload is stored verbatim and returned at query time.
+    The collection name is stamped into every payload under
+    'embedding_collection' so the query path knows the origin.
 
     Args:
-        vectors:  List of 1024-float embeddings (output of embed_batch()).
-        payloads: List of dicts, one per vector. Required keys:
-                  - case_id: str — security boundary (e.g. UUID of the case)
-                  - doc_id:  str — which document the chunk came from
-                  Recommended keys (for citation later):
-                  - page: int | None
-                  - ts_start: float | None
-                  - section_title: str | None
-                  - content: str  (chunk text)
+        vectors:         List of float embeddings.
+        payloads:        One dict per vector. Required: case_id, doc_id.
+        collection_name: Which collection to write to (default: legalvault_e5).
 
     Returns:
-        List of Qdrant point IDs (UUIDs as strings), same order as input.
-
-    Raises:
-        ValueError: If vectors and payloads lengths differ, or if any
-                    payload is missing 'case_id' or 'doc_id'.
+        List of point UUIDs (strings), same order as input.
     """
     if len(vectors) != len(payloads):
         raise ValueError(
@@ -97,18 +110,22 @@ def insert(
         )
     for i, p in enumerate(payloads):
         if "case_id" not in p or "doc_id" not in p:
-            raise ValueError(f"Payload at index {i} must contain 'case_id' and 'doc_id'.")
+            raise ValueError(f"Payload[{i}] missing 'case_id' or 'doc_id'.")
 
-    from qdrant_client.models import PointStruct  # noqa: PLC0415
+    from qdrant_client.models import PointStruct
 
-    client = _get_client()
+    client = _get_or_create(collection_name)
     ids = [str(uuid.uuid4()) for _ in vectors]
+
+    for p in payloads:
+        p.setdefault("embedding_collection", collection_name)
+
     points = [
-        PointStruct(id=point_id, vector=vec, payload=payload)
-        for point_id, vec, payload in zip(ids, vectors, payloads)
+        PointStruct(id=pid, vector=vec, payload=payload)
+        for pid, vec, payload in zip(ids, vectors, payloads)
     ]
-    client.upsert(collection_name=_COLLECTION, points=points)
-    logger.info("Inserted %d vectors into Qdrant.", len(points))
+    client.upsert(collection_name=collection_name, points=points)
+    logger.info("Inserted %d vectors into '%s'.", len(points), collection_name)
     return ids
 
 
@@ -116,44 +133,31 @@ def query(
     vector: list[float],
     case_id: str,
     top_k: int = 30,
+    collection_name: str = _DEFAULT_COLLECTION,
 ) -> list[dict]:
-    """Search for the top-k nearest vectors, filtered by case_id.
+    """Search a collection for the top-k vectors matching case_id.
 
-    The case_id filter is MANDATORY and applied server-side. This is the
-    security boundary that isolates tenants.
-
-    Args:
-        vector:  Query embedding (1024 floats from embed()).
-        case_id: The case whose corpus to search. Cross-case results are
-                 impossible by design.
-        top_k:   Maximum neighbours to return.
+    Returns empty list if the collection doesn't exist yet — callers that
+    fan-out across both collections should handle this gracefully.
 
     Returns:
-        List of result dicts::
-
-            [
-                {
-                    "id":      str,    # Qdrant point ID
-                    "score":   float,  # cosine similarity (0–1)
-                    "payload": dict,   # original metadata dict
-                },
-                ...
-            ]
-
-        Sorted descending by score. May be fewer than top_k if the case
-        has fewer indexed chunks.
+        List of {'id', 'score', 'payload'} sorted descending by score.
     """
-    from qdrant_client.models import Filter, FieldCondition, MatchValue  # noqa: PLC0415
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
 
     client = _get_client()
+
+    existing = {c.name for c in client.get_collections().collections}
+    if collection_name not in existing:
+        logger.debug("Collection '%s' not found — returning empty results.", collection_name)
+        return []
 
     case_filter = Filter(
         must=[FieldCondition(key="case_id", match=MatchValue(value=case_id))]
     )
 
-    # qdrant-client >= 1.7 replaced search() with query_points()
     response = client.query_points(
-        collection_name=_COLLECTION,
+        collection_name=collection_name,
         query=vector,
         query_filter=case_filter,
         limit=top_k,
@@ -170,27 +174,66 @@ def query(
     ]
 
 
-def delete_by_doc(doc_id: str) -> int:
-    """Remove all vectors belonging to a document (used when a doc is deleted).
+def query_all_collections(
+    vectors_by_collection: dict,
+    case_id: str,
+    top_k: int = 30,
+) -> list[dict]:
+    """Fan-out query across multiple collections and merge by score.
+
+    Used when a case has docs in both legalvault_e5 and legalvault_bge.
+    Each collection gets its own correctly-dimensioned query vector.
 
     Args:
-        doc_id: The document whose vectors to purge.
+        vectors_by_collection: {collection_name: query_vector}
+        case_id:               Security filter applied to all collections.
+        top_k:                 Max results per collection before merge.
 
     Returns:
-        Number of points deleted.
+        Merged list sorted descending by score. Caller passes this to
+        the hybrid RRF fusion step alongside BM25 results.
     """
-    from qdrant_client.models import Filter, FieldCondition, MatchValue  # noqa: PLC0415
+    all_results = []
+    for coll, vec in vectors_by_collection.items():
+        results = query(vec, case_id, top_k=top_k, collection_name=coll)
+        all_results.extend(results)
+    all_results.sort(key=lambda r: r["score"], reverse=True)
+    return all_results
+
+
+def delete_by_doc(
+    doc_id: str,
+    collection_name: str = None,
+) -> int:
+    """Remove all vectors for a document.
+
+    If collection_name is None, deletes from ALL known collections
+    (safe for legacy docs that don't track which collection was used).
+
+    Returns total points deleted.
+    """
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
 
     client = _get_client()
+    existing = {c.name for c in client.get_collections().collections}
     doc_filter = Filter(
         must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
     )
-    # Count before deleting — qdrant-client 1.7+ result has no .deleted count
-    count_before = client.count(
-        collection_name=_COLLECTION,
-        count_filter=doc_filter,
-        exact=True,
-    ).count
-    client.delete(collection_name=_COLLECTION, points_selector=doc_filter)
-    logger.info("Purged %d vectors for doc_id='%s'.", count_before, doc_id)
-    return count_before
+
+    targets = [collection_name] if collection_name else list(_COLLECTION_DIMS.keys())
+    total_deleted = 0
+
+    for coll in targets:
+        if coll not in existing:
+            continue
+        count = client.count(
+            collection_name=coll,
+            count_filter=doc_filter,
+            exact=True,
+        ).count
+        if count:
+            client.delete(collection_name=coll, points_selector=doc_filter)
+            logger.info("Purged %d vectors for doc='%s' from '%s'.", count, doc_id, coll)
+            total_deleted += count
+
+    return total_deleted
