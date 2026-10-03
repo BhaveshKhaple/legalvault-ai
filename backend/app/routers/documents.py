@@ -60,14 +60,13 @@ def _ingest_pdf(
 
     try:
         pages = extract_docling(path)
+    except RuntimeError:
+        logger.warning(f"Docling: scanned image '{filename}', falling back to PyMuPDF")
+        pages = extract_pdf(path)
     except Exception as exc:
-        if (
-            "DocumentConversionError" in str(exc)
-            or "RuntimeError" in str(exc)
-            or "image-only" in str(exc).lower()
-        ):
+        if "DocumentConversionError" in type(exc).__name__:
             logger.warning(
-                f"Docling failed to convert '{filename}', falling back to PyMuPDF. Reason: {exc}"
+                f"Docling conversion failed for '{filename}', falling back: {exc}"
             )
             pages = extract_pdf(path)
         else:

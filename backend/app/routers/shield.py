@@ -82,14 +82,13 @@ def _run_shield_pipeline(doc: Document, case_id: str) -> dict:
     # 1. Extract text from stored PDF
     try:
         pages = extract_docling(doc.storage_path)
+    except RuntimeError:
+        logger.warning(f"Docling: scanned image '{doc.filename}', falling back to PyMuPDF")
+        pages = extract_pdf(doc.storage_path)
     except Exception as exc:
-        if (
-            "DocumentConversionError" in str(exc)
-            or "RuntimeError" in str(exc)
-            or "image-only" in str(exc).lower()
-        ):
+        if "DocumentConversionError" in type(exc).__name__:
             logger.warning(
-                f"Docling failed to convert '{doc.filename}', falling back to PyMuPDF. Reason: {exc}"
+                f"Docling conversion failed for '{doc.filename}', falling back: {exc}"
             )
             pages = extract_pdf(doc.storage_path)
         else:
