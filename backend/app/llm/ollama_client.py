@@ -52,17 +52,23 @@ def generate(
     context: list[str] | None = None,
     model: str = _DEFAULT_MODEL,
     timeout: int = _TIMEOUT_SEC,
+    num_predict: int | None = None,
+    num_ctx: int | None = None,
 ) -> str:
     """Send a prompt to Ollama and return the generated text.
 
     Args:
-        prompt:  The user question or instruction.
-        context: Optional list of retrieved chunk texts to include as
-                 grounding context. Joined with newlines and prepended to
-                 the prompt in a simple RAG pattern. Task 4.3 will replace
-                 this with a proper citation-enforcing prompt template.
-        model:   Ollama model name. Defaults to OLLAMA_MODEL env var or 'phi4'.
-        timeout: Per-request timeout in seconds. Defaults to OLLAMA_TIMEOUT_SEC.
+        prompt:      The user question or instruction.
+        context:     Optional list of retrieved chunk texts to include as
+                     grounding context. Joined with newlines and prepended to
+                     the prompt in a simple RAG pattern. Task 4.3 will replace
+                     this with a proper citation-enforcing prompt template.
+        model:       Ollama model name. Defaults to OLLAMA_MODEL env var or 'phi4'.
+        timeout:     Per-request timeout in seconds. Defaults to OLLAMA_TIMEOUT_SEC.
+        num_predict: Optional override for max tokens generated (e.g. 50 for classification).
+                     If None, defaults to OLLAMA_NUM_PREDICT (300).
+        num_ctx:     Optional override for context window size (e.g. 1024 for verification).
+                     If None, defaults to OLLAMA_NUM_CTX (4096).
 
     Returns:
         The model's response as a plain string.
@@ -79,9 +85,13 @@ def generate(
     # num_predict caps answer length so short questions don't run for minutes.
     # flash_attention halves prompt-processing time on CPU.
     _num_gpu = int(os.environ.get("OLLAMA_NUM_GPU", "999"))
-    _num_predict = int(os.environ.get("OLLAMA_NUM_PREDICT", "300"))
+    _default_num_predict = int(os.environ.get("OLLAMA_NUM_PREDICT", "300"))
+    _actual_num_predict = (
+        num_predict if num_predict is not None else _default_num_predict
+    )
     _flash_attn = os.environ.get("OLLAMA_FLASH_ATTENTION", "1") == "1"
-    _num_ctx = int(os.environ.get("OLLAMA_NUM_CTX", "4096"))
+    _default_num_ctx = int(os.environ.get("OLLAMA_NUM_CTX", "4096"))
+    _actual_num_ctx = num_ctx if num_ctx is not None else _default_num_ctx
     # Determinism: temperature 0 + fixed seed. Without this, phi3:mini answers
     # the same question differently every call — sometimes hitting the
     # "I do not have evidence…" fallback in the system prompt even when
@@ -102,8 +112,8 @@ def generate(
         "keep_alive": _keep_alive,
         "options": {
             "num_gpu": _num_gpu,
-            "num_predict": _num_predict,
-            "num_ctx": _num_ctx,
+            "num_predict": _actual_num_predict,
+            "num_ctx": _actual_num_ctx,
             "flash_attention": _flash_attn,
             "temperature": _temperature,
             "seed": _seed,
@@ -112,7 +122,9 @@ def generate(
         },
     }
 
-    logger.debug("Ollama generate — model='%s', prompt_len=%d chars.", model, len(full_prompt))
+    logger.debug(
+        "Ollama generate — model='%s', prompt_len=%d chars.", model, len(full_prompt)
+    )
 
     try:
         response = requests.post(

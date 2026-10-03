@@ -874,12 +874,15 @@ function refreshShieldDocList() {
 async function runShield() {
   const docId = document.getElementById('shield-doc-select').value;
   if (!docId) { toast('Select a document first', 'err'); return; }
+  const btn = document.querySelector('#pane-shield .btn-primary') || document.querySelector('#pane-shield button');
+  if (btn) btn.disabled = true;
   const res_el = document.getElementById('shield-result');
-  res_el.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Running audit…</div><div class="empty-desc">Verifying every claim against indexed documents. This may take a moment.</div></div>';
+  res_el.innerHTML = '<div class="empty-state"><div class="empty-icon" style="animation:spin 2s linear infinite">⏳</div><div class="empty-title">Running neural audit…</div><div class="empty-desc">Extracting claims, cross-referencing indexed documents, and auditing for contradictions.</div></div>';
   try {
     const res = await api('POST', `/v1/cases/${currentCaseId}/shield`, { source_doc_id: docId });
     renderShield(res);
   } catch(e) { res_el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-title">Audit failed</div><div class="empty-desc">${esc(e.message)}</div></div>`; }
+  finally { if (btn) btn.disabled = false; }
 }
 
 function renderShield(res) {
@@ -891,16 +894,41 @@ function renderShield(res) {
   const bandColor = band === 'strong' ? 'var(--green)' : band === 'review' ? 'var(--amber)' : 'var(--red)';
 
   const verifiedHtml = (res.verified_count > 0)
-    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--green)">✓</span> Verified (${res.verified_count})</div></div>` : '';
+    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--green)">✓</span> Verified (${res.verified_count})</div>
+        ${(res.verified_claims||[]).slice(0, 8).map(c=>`<div class="claim-row">
+          <div class="claim-status"><span class="pill" style="background:rgba(16,185,129,0.12);color:var(--green)"><span class="pill-dot" style="background:var(--green)"></span>Verified</span></div>
+          <div class="claim-text">${esc(c.claim)}</div>
+        </div>`).join('')}
+        ${(res.verified_claims||[]).length > 8 ? `<div style="font-size:12px;color:var(--text-muted);padding:4px 8px">+ ${(res.verified_claims.length - 8)} more verified statements</div>` : ''}
+      </div>` : '';
 
   const unverifiedHtml = (res.unverified_count > 0)
-    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--amber)">○</span> Unverified (${res.unverified_count})</div></div>` : '';
+    ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--amber)">○</span> Unverified (${res.unverified_count})</div>
+        ${(res.unverified_claims||[]).slice(0, 6).map(c=>`<div class="claim-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+          <div style="display:flex;align-items:center;gap:10px;width:100%">
+            <div class="claim-status"><span class="pill" style="background:rgba(245,158,11,0.12);color:var(--amber)"><span class="pill-dot" style="background:var(--amber)"></span>Unverified</span></div>
+            <div class="claim-text">${esc(c.claim)}</div>
+          </div>
+          <div style="font-size:11px;color:var(--ink-3);margin-left:4px">No corroborating evidence found in indexed case documents.</div>
+        </div>`).join('')}
+        ${(res.unverified_claims||[]).length > 6 ? `<div style="font-size:12px;color:var(--ink-3);padding:4px 8px">+ ${(res.unverified_claims.length - 6)} more unverified statements</div>` : ''}
+      </div>` : '';
 
   const contradictedHtml = (res.contradiction_count > 0)
     ? `<div class="shield-section"><div class="shield-section-title"><span style="color:var(--red)">✗</span> Contradicted (${res.contradiction_count})</div>
-        ${(res.contradictions||[]).map(c=>`<div class="claim-row">
-          <div class="claim-status"><span class="pill pill-contradicted"><span class="pill-dot"></span>Contradicted</span></div>
-          <div class="claim-text">${esc(c.claim)}</div></div>`).join('')}
+        ${(res.contradictions||[]).map(c=>`<div class="claim-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px;width:100%">
+            <div class="claim-status"><span class="pill pill-contradicted"><span class="pill-dot"></span>Contradicted</span></div>
+            <div class="claim-text" style="font-weight:600">${esc(c.claim)}</div>
+          </div>
+          ${c.reason ? `<div style="padding:8px 12px;background:rgba(239,68,68,0.10);border-left:3px solid var(--red);border-radius:4px;font-size:13px;color:var(--ink);width:100%">
+            <span style="font-weight:600;color:var(--red)">⚠️ Problem in claim:</span> ${esc(c.reason)}
+          </div>` : ''}
+          ${(c.evidence && c.evidence.length > 0 && c.evidence[0].content) ? `<div style="padding:8px 12px;background:var(--paper);border:1px solid var(--line);border-radius:4px;font-size:12px;color:var(--ink-2);width:100%">
+            <strong style="color:var(--ink)">Document Record (${esc(c.evidence[0].filename || 'Case Record')}${c.evidence[0].page ? `, p.${c.evidence[0].page}` : ''}):</strong>
+            <div style="margin-top:3px;font-style:italic">"${esc(c.evidence[0].content.slice(0, 240))}..."</div>
+          </div>` : ''}
+        </div>`).join('')}
       </div>` : '';
 
   const missingHtml = (res.missing_count > 0)

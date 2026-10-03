@@ -1,8 +1,6 @@
-"""Tests for Task 5.2 — Reverse-RAG claim verifier."""
+"""Tests for Task 5.2 â€” Reverse-RAG claim verifier."""
 
 import uuid
-from unittest.mock import patch, MagicMock
-
 import pytest
 
 from backend.app.shield.verifier import verify_claim, verify_claims
@@ -32,23 +30,16 @@ def _make_candidates(score=0.8, content="Penalty interest at 2% per month."):
 @pytest.fixture(autouse=True)
 def mock_pipeline(monkeypatch):
     """Mock all heavy dependencies so tests run without models."""
-    monkeypatch.setattr(
-        "backend.app.shield.verifier._embed_claim", _mock_embed
-    )
+    monkeypatch.setattr("backend.app.shield.verifier._embed_claim", _mock_embed)
     monkeypatch.setattr(
         "backend.app.shield.verifier._search_evidence",
-        lambda vec, case_id, top_k=10: _make_candidates(),
+        lambda vec, case_id, top_k=10, collection_name=None: _make_candidates(),
     )
 
     def _fake_rerank(query, candidates, k=3):
-        return [
-            {**c, "rerank_score": 0.85}
-            for c in candidates[:k]
-        ]
+        return [{**c, "rerank_score": 0.85} for c in candidates[:k]]
 
-    monkeypatch.setattr(
-        "backend.app.shield.verifier._rerank_evidence", _fake_rerank
-    )
+    monkeypatch.setattr("backend.app.shield.verifier._rerank_evidence", _fake_rerank)
     monkeypatch.setattr(
         "backend.app.shield.verifier._llm_support_or_contradict",
         lambda claim, texts, model: "Verified",
@@ -69,17 +60,19 @@ class TestVerifyClaim:
     def test_unverified_when_no_evidence(self, monkeypatch):
         monkeypatch.setattr(
             "backend.app.shield.verifier._search_evidence",
-            lambda vec, case_id, top_k=10: [],
+            lambda vec, case_id, top_k=10, collection_name=None: [],
         )
         result = verify_claim("Penalty is 2% per month.", "case-123")
         assert result["status"] == "Unverified"
         assert result["evidence"] == []
 
     def test_unverified_when_score_below_threshold(self, monkeypatch):
-        # Threshold is 0.3 on sigmoid-normalized score. sigmoid(-5) ≈ 0.007 — below 0.3.
+        # Threshold is 0.3 on sigmoid-normalized score. sigmoid(-5) â‰ˆ 0.007 â€” below 0.3.
         monkeypatch.setattr(
             "backend.app.shield.verifier._rerank_evidence",
-            lambda q, candidates, k=3: [{**c, "rerank_score": -5.0} for c in candidates[:k]],
+            lambda q, candidates, k=3: [
+                {**c, "rerank_score": -5.0} for c in candidates[:k]
+            ],
         )
         result = verify_claim("Penalty is 2% per month.", "case-123")
         assert result["status"] == "Unverified"
