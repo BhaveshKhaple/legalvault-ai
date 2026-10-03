@@ -176,6 +176,8 @@ async def upload_document(
         id=doc_id,
         case_id=case_id,
         filename=file.filename or f"document{suffix}",
+        # FileType enum currently has only pdf/audio — map .txt/.docx to pdf
+        # since they share the same text-page shape downstream.
         doc_type=FileType.audio if suffix in _AUDIO_SUFFIXES else FileType.pdf,
         storage_path=str(storage_path),
         sha256=hashlib.sha256(content).hexdigest(),
