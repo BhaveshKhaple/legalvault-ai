@@ -54,3 +54,5 @@ email-validator>=2.2,<3.0
 python-docx>=1.1,<2.0
 reportlab>=4.2,<5.0
 # 9.3  ARQ task queue       → arq, redis
+# phase-1 Docling parser
+docling>=2.0,<3.0

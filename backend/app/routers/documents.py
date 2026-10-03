@@ -24,9 +24,20 @@ from fastapi.concurrency import run_in_threadpool
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from backend.app.auth.dependencies import get_case_for_user, get_current_user, require_role
+from backend.app.auth.dependencies import (
+    get_case_for_user,
+    get_current_user,
+    require_role,
+)
 from backend.app.database import get_session
-from backend.app.models import Case, Chunk, Document, FileType, IngestStatus, User, UserRole
+from backend.app.models import (
+    Chunk,
+    Document,
+    FileType,
+    IngestStatus,
+    User,
+    UserRole,
+)
 
 router = APIRouter()
 
@@ -155,7 +166,7 @@ async def upload_document(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_role(UserRole.analyst)),
 ):
-    case = await get_case_for_user(case_id, session, user)
+    await get_case_for_user(case_id, session, user)
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
@@ -207,16 +218,18 @@ async def upload_document(
             qdrant_uuid = uuid.UUID(ch["qdrant_id"]) if ch.get("qdrant_id") else None
         except ValueError:
             pass
-        session.add(Chunk(
-            document_id=doc_id,
-            content=ch["content"],
-            chunk_index=i,
-            page_number=ch.get("page"),
-            ts_start=ch.get("ts_start"),
-            ts_end=ch.get("ts_end"),
-            section_title=ch.get("section_title"),
-            qdrant_id=qdrant_uuid,
-        ))
+        session.add(
+            Chunk(
+                document_id=doc_id,
+                content=ch["content"],
+                chunk_index=i,
+                page_number=ch.get("page"),
+                ts_start=ch.get("ts_start"),
+                ts_end=ch.get("ts_end"),
+                section_title=ch.get("section_title"),
+                qdrant_id=qdrant_uuid,
+            )
+        )
 
     doc.status = IngestStatus.done
     doc.qdrant_collection = qdrant_coll
@@ -257,7 +270,9 @@ async def doc_status(
     }
 
 
-@router.delete("/{case_id}/documents/{doc_id}", summary="Delete document and its vectors")
+@router.delete(
+    "/{case_id}/documents/{doc_id}", summary="Delete document and its vectors"
+)
 async def delete_document(
     case_id: uuid.UUID,
     doc_id: uuid.UUID,
