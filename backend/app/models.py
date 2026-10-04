@@ -135,6 +135,15 @@ class Chunk(SQLModel, table=True):
     ts_end: Optional[float] = Field(default=None)
     section_title: Optional[str] = Field(default=None, max_length=500)
     qdrant_id: Optional[uuid.UUID] = Field(default=None)
+    # Phase 2 — parent-child chunking.
+    # chunk_role: "child" (embedded, retrieval) | "parent" (SQLite-only, LLM context)
+    # Audio and legacy flat chunks default to "child" so queries still work.
+    chunk_role: str = Field(default="child", max_length=10)
+    # Pointer from a child to its parent chunk (same table). Null for parents
+    # themselves, for audio chunks, and for pre-Phase-2 legacy rows.
+    parent_chunk_id: Optional[uuid.UUID] = Field(default=None, foreign_key="chunks.id")
+    # True when a chunk represents a table (atomic parent==child).
+    is_table: bool = Field(default=False)
 
 
 # ─── queries ──────────────────────────────────────────────────────────────────

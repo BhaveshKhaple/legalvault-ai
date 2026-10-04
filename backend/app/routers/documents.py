@@ -55,40 +55,62 @@ def _ingest_text_like(
     case_id: uuid.UUID,
     filename: str,
     suffix: str,
-) -> tuple[list[dict], str, str]:
-    """Extract, chunk, dispatch, embed, index a text-format document.
+) -> tuple[dict, str, str]:
+    """Extract → hierarchical chunk → dispatch → embed children → index to Qdrant.
 
     Returns:
-        (chunks, qdrant_collection, embedding_tier)
+        ({"parents": [...], "children": [... with qdrant_id]}, qdrant_collection, embedding_tier)
+
+    Only CHILDREN are embedded + indexed to Qdrant. Parents stay in SQLite
+    and are swapped in at the LLM-context stage of rag_service.run_rag().
     """
-    from backend.app.ingestion.clause_chunker import chunk_legal_doc
     from backend.app.ingestion.embedding_dispatcher import dispatch
+    from backend.app.ingestion.hierarchical_chunker import chunk_hierarchical
     from backend.app.retrieval.embeddings import embed_batch
     from backend.app.retrieval.vector_store import insert
 
+    # ── 1. Extract pages (Docling for PDF/DOCX, fallbacks for TXT/legacy) ────
     if suffix == ".pdf":
+        from backend.app.ingestion.docling_extractor import extract_docling
         from backend.app.ingestion.pdf_extractor import extract_pdf
-        pages = extract_pdf(path)
+        try:
+            pages = extract_docling(path)
+        except RuntimeError:
+            pages = extract_pdf(path)
+        except Exception as exc:
+            if "DocumentConversionError" in type(exc).__name__:
+                pages = extract_pdf(path)
+            else:
+                raise
+    elif suffix == ".docx":
+        from backend.app.ingestion.docling_extractor import extract_docling
+        from backend.app.ingestion.docx_extractor import extract_docx
+        try:
+            pages = extract_docling(path)
+        except Exception:
+            pages = extract_docx(path)
     elif suffix == ".txt":
         from backend.app.ingestion.text_extractor import extract_text
         pages = extract_text(path)
-    elif suffix == ".docx":
-        from backend.app.ingestion.docx_extractor import extract_docx
-        pages = extract_docx(path)
     else:
         raise ValueError(f"No text extractor registered for '{suffix}'")
 
     if not pages:
-        return [], "legalvault_e5", "e5_small"
+        return {"parents": [], "children": []}, "legalvault_e5", "e5_small"
 
-    # ── embedding dispatcher ──────────────────────────────────────────────────
+    # ── 2. Dispatcher picks embedding tier (based on file size/lang/pages) ────
     decision = dispatch(file_path=path, pages=pages)
 
-    chunks = chunk_legal_doc(pages)
-    if not chunks:
-        return [], decision.collection_name, decision.tier
+    # ── 3. Hierarchical chunking: parents (SQLite only) + children (embedded)
+    hier = chunk_hierarchical(pages)
+    parents = hier["parents"]
+    children = hier["children"]
 
-    texts = [ch["content"] for ch in chunks]
+    if not children:
+        return {"parents": parents, "children": []}, decision.collection_name, decision.tier
+
+    # ── 4. Embed only children ────────────────────────────────────────────────
+    texts = [ch["content"] for ch in children]
     vectors = embed_batch(texts, model_name=decision.model_name)
     payloads = [
         {
@@ -99,14 +121,16 @@ def _ingest_text_like(
             "page": ch.get("page"),
             "section_title": ch.get("section_title"),
             "embedding_tier": decision.tier,
+            "chunk_role": "child",
+            "is_table": ch.get("is_table", False),
         }
-        for ch in chunks
+        for ch in children
     ]
     qdrant_ids = insert(vectors, payloads, collection_name=decision.collection_name)
-    for ch, qid in zip(chunks, qdrant_ids):
+    for ch, qid in zip(children, qdrant_ids):
         ch["qdrant_id"] = qid
 
-    return chunks, decision.collection_name, decision.tier
+    return {"parents": parents, "children": children}, decision.collection_name, decision.tier
 
 
 def _ingest_audio(
@@ -199,18 +223,41 @@ async def upload_document(
 
     try:
         if suffix in _AUDIO_SUFFIXES:
-            chunks, qdrant_coll, emb_tier = await run_in_threadpool(
+            audio_chunks, qdrant_coll, emb_tier = await run_in_threadpool(
                 _ingest_audio, str(storage_path), doc_id, case_id, doc.filename
             )
+            # Audio path has no parent-child hierarchy; wrap flat chunks for the
+            # persistence loop below.
+            hier = {"parents": [], "children": audio_chunks}
+            chunks = audio_chunks
         else:
-            chunks, qdrant_coll, emb_tier = await run_in_threadpool(
+            hier, qdrant_coll, emb_tier = await run_in_threadpool(
                 _ingest_text_like, str(storage_path), doc_id, case_id, doc.filename, suffix
             )
+            chunks = hier["children"]
     except Exception as exc:
         doc.status = IngestStatus.error
         doc.error_message = str(exc)[:500]
         await session.commit()
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
+
+    # ── Persist PARENTS first so we can resolve child → parent FK ────────────
+    parent_db_ids: list[uuid.UUID] = []
+    for pi, p in enumerate(hier["parents"]):
+        p_row = Chunk(
+            document_id=doc_id,
+            content=p["content"],
+            chunk_index=pi,  # parent indices start at 0; children get their own below
+            page_number=p.get("page"),
+            section_title=p.get("section_title"),
+            chunk_role="parent",
+            parent_chunk_id=None,
+            is_table=bool(p.get("is_table", False)),
+        )
+        session.add(p_row)
+        parent_db_ids.append(p_row.id)
+    if hier["parents"]:
+        await session.flush()  # assign PKs so children can reference them
 
     for i, ch in enumerate(chunks):
         qdrant_uuid = None
@@ -218,6 +265,9 @@ async def upload_document(
             qdrant_uuid = uuid.UUID(ch["qdrant_id"]) if ch.get("qdrant_id") else None
         except ValueError:
             pass
+        # Resolve child → parent FK via parent_index (set by hierarchical_chunker)
+        p_idx = ch.get("parent_index")
+        parent_fk = parent_db_ids[p_idx] if (p_idx is not None and 0 <= p_idx < len(parent_db_ids)) else None
         session.add(
             Chunk(
                 document_id=doc_id,
@@ -228,6 +278,9 @@ async def upload_document(
                 ts_end=ch.get("ts_end"),
                 section_title=ch.get("section_title"),
                 qdrant_id=qdrant_uuid,
+                chunk_role="child",
+                parent_chunk_id=parent_fk,
+                is_table=bool(ch.get("is_table", False)),
             )
         )
 
