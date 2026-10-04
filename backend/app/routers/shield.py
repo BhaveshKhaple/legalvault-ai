@@ -79,20 +79,22 @@ def _run_shield_pipeline(doc: Document, case_id: str) -> dict:
 
     logger = logging.getLogger(__name__)
 
-    # 1. Extract text from stored PDF
+    # 1. Extract text from stored PDF (PyMuPDF is instant ~40ms; Docling OCR as fallback)
     try:
-        pages = extract_docling(doc.storage_path)
-    except RuntimeError:
-        logger.warning(f"Docling: scanned image '{doc.filename}', falling back to PyMuPDF")
         pages = extract_pdf(doc.storage_path)
-    except Exception as exc:
-        if "DocumentConversionError" in type(exc).__name__:
-            logger.warning(
-                f"Docling conversion failed for '{doc.filename}', falling back: {exc}"
+        if not pages or not any(p.get("text", "").strip() for p in pages):
+            logger.info(
+                f"PyMuPDF found no text in '{doc.filename}', trying Docling OCR fallback"
             )
-            pages = extract_pdf(doc.storage_path)
-        else:
-            raise
+            pages = extract_docling(doc.storage_path)
+    except Exception as exc:
+        logger.warning(
+            f"PyMuPDF extraction failed for '{doc.filename}', trying Docling: {exc}"
+        )
+        try:
+            pages = extract_docling(doc.storage_path)
+        except Exception:
+            pages = []
 
     if not pages:
         return {
@@ -111,7 +113,10 @@ def _run_shield_pipeline(doc: Document, case_id: str) -> dict:
 
     # 2. Extract claims
     full_text = "\n".join(p.get("text", "") for p in pages)
-    claims = extract_claims(full_text)
+    extracted = extract_claims(full_text)
+    # Filter trivial/fragment items and keep substantive claims (max 25)
+    substantive = [c for c in extracted if len(c.strip()) >= 15]
+    claims = substantive[:25] if len(substantive) > 25 else (substantive or extracted)
 
     # 3. Detect missing sections
     doc_type_str = (
@@ -127,7 +132,29 @@ def _run_shield_pipeline(doc: Document, case_id: str) -> dict:
     gap_report = detect_gaps_from_pages(pages, template_type)
 
     # 4. Verify claims (Reverse-RAG)
-    verification_results = verify_claims(claims, case_id)
+    # Discover which Qdrant collections hold this case's docs so the verifier
+    # can fan-out correctly (e.g. legalvault_e5 AND/OR legalvault_bge).
+    import sqlite3 as _sqlite3
+    import os as _os
+
+    _db_url = _os.environ.get(
+        "DATABASE_URL", "sqlite+aiosqlite:///./data/legalvault.db"
+    )
+    _db_path = _db_url.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
+    try:
+        _conn = _sqlite3.connect(_db_path)
+        _cur = _conn.cursor()
+        _cur.execute(
+            "SELECT DISTINCT qdrant_collection FROM documents "
+            "WHERE case_id=? AND status='done' AND qdrant_collection IS NOT NULL",
+            (case_id,),
+        )
+        _collections = [r[0] for r in _cur.fetchall()] or ["legalvault_e5"]
+        _conn.close()
+    except Exception:
+        _collections = ["legalvault_e5"]
+
+    verification_results = verify_claims(claims, case_id, collections=_collections)
 
     # 5. Aggregate trust score
     score_result = aggregate(verification_results, gap_report.to_dict())
@@ -136,4 +163,10 @@ def _run_shield_pipeline(doc: Document, case_id: str) -> dict:
         **score_result.to_dict(),
         "total_claims": len(claims),
         "flags": score_result.contradictions,
+        "verified_claims": [
+            r for r in verification_results if r.get("status") == "Verified"
+        ],
+        "unverified_claims": [
+            r for r in verification_results if r.get("status") == "Unverified"
+        ],
     }
