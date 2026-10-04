@@ -34,15 +34,15 @@ _UNVERIFIED_PENALTY = 3
 
 @dataclass
 class TrustScoreResult:
-    trust_score: int               # 0-100
+    trust_score: int  # 0-100
     band: TrustBand
-    band_label: str                # Human-readable label
+    band_label: str  # Human-readable label
     verified_count: int
     unverified_count: int
     contradiction_count: int
     missing_count: int
-    contradictions: list[dict]     # full contradiction evidence for UI
-    missing_sections: list[str]    # names of missing required sections
+    contradictions: list[dict]  # full contradiction evidence for UI
+    missing_sections: list[str]  # names of missing required sections
 
     def to_dict(self) -> dict:
         return {
@@ -82,7 +82,9 @@ def aggregate(
     """
     verified = [r for r in verification_results if r.get("status") == "Verified"]
     unverified = [r for r in verification_results if r.get("status") == "Unverified"]
-    contradicted = [r for r in verification_results if r.get("status") == "Contradicted"]
+    contradicted = [
+        r for r in verification_results if r.get("status") == "Contradicted"
+    ]
 
     missing = gap_report_dict.get("missing", [])
 
@@ -103,7 +105,11 @@ def aggregate(
         contradiction_count=len(contradicted),
         missing_count=len(missing),
         contradictions=[
-            {"claim": r["claim"], "evidence": r.get("evidence", [])}
+            {
+                "claim": r["claim"],
+                "reason": r.get("reason", ""),
+                "evidence": r.get("evidence", []),
+            }
             for r in contradicted
         ],
         missing_sections=[s["name"] for s in missing],
