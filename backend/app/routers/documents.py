@@ -17,10 +17,13 @@ Upload flow:
 
 import hashlib
 import uuid
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -39,6 +42,46 @@ from backend.app.models import (
     UserRole,
 )
 
+
+def _parse_effective_date(raw: Optional[str]) -> Optional[datetime]:
+    """Accept 'YYYY-MM-DD' or full ISO datetime; return tz-aware UTC datetime.
+
+    SQLModel's DateTime column rejects naive datetimes — any value we persist
+    must carry a timezone. If the input is a bare date we attach UTC.
+    """
+    from datetime import timezone
+
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=422,
+            detail=f"effective_date must be ISO format (YYYY-MM-DD or full ISO), got '{raw}'",
+        )
+
+
+def _metadata_payload(doc: Document) -> dict:
+    """Build the metadata subset we stamp on every Qdrant chunk payload.
+
+    Dates serialised as unix timestamp (int) so Qdrant's range filter works.
+    Strings serialised as-is (match filter).
+    """
+    out: dict = {}
+    if doc.effective_date is not None:
+        out["effective_date_ts"] = int(doc.effective_date.timestamp())
+    if doc.jurisdiction:
+        out["jurisdiction"] = doc.jurisdiction
+    if doc.version_tag:
+        out["version_tag"] = doc.version_tag
+    if doc.regulator:
+        out["regulator"] = doc.regulator
+    return out
+
 router = APIRouter()
 
 _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"}
@@ -55,6 +98,7 @@ def _ingest_text_like(
     case_id: uuid.UUID,
     filename: str,
     suffix: str,
+    extra_metadata: Optional[dict] = None,
 ) -> tuple[dict, str, str]:
     """Extract → hierarchical chunk → dispatch → embed children → index to Qdrant.
 
@@ -112,6 +156,7 @@ def _ingest_text_like(
     # ── 4. Embed only children ────────────────────────────────────────────────
     texts = [ch["content"] for ch in children]
     vectors = embed_batch(texts, model_name=decision.model_name)
+    md = extra_metadata or {}
     payloads = [
         {
             "case_id": str(case_id),
@@ -123,6 +168,7 @@ def _ingest_text_like(
             "embedding_tier": decision.tier,
             "chunk_role": "child",
             "is_table": ch.get("is_table", False),
+            **md,  # Phase 3: effective_date_ts, jurisdiction, version_tag, regulator
         }
         for ch in children
     ]
@@ -187,10 +233,16 @@ def _ingest_audio(
 async def upload_document(
     case_id: uuid.UUID,
     file: UploadFile,
+    # ── Phase 3: optional metadata (all can be set later via PATCH) ───────────
+    effective_date: Optional[str] = Form(default=None, description="ISO date (YYYY-MM-DD) when the doc took effect"),
+    jurisdiction: Optional[str] = Form(default=None, description="e.g. 'India', 'Maharashtra', 'Delhi HC'"),
+    version_tag: Optional[str] = Form(default=None, description="e.g. 'v2', '2026-01-15'"),
+    regulator: Optional[str] = Form(default=None, description="e.g. 'RBI', 'SEBI', 'MCA'"),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_role(UserRole.analyst)),
 ):
     await get_case_for_user(case_id, session, user)
+    effective_date_dt = _parse_effective_date(effective_date)
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
@@ -211,15 +263,19 @@ async def upload_document(
         id=doc_id,
         case_id=case_id,
         filename=file.filename or f"document{suffix}",
-        # FileType enum currently has only pdf/audio — map .txt/.docx to pdf
-        # since they share the same text-page shape downstream.
         doc_type=FileType.audio if suffix in _AUDIO_SUFFIXES else FileType.pdf,
         storage_path=str(storage_path),
         sha256=hashlib.sha256(content).hexdigest(),
         status=IngestStatus.indexing,
+        effective_date=effective_date_dt,
+        jurisdiction=jurisdiction,
+        version_tag=version_tag,
+        regulator=regulator,
     )
     session.add(doc)
     await session.commit()
+
+    extra_metadata = _metadata_payload(doc)
 
     try:
         if suffix in _AUDIO_SUFFIXES:
@@ -232,7 +288,7 @@ async def upload_document(
             chunks = audio_chunks
         else:
             hier, qdrant_coll, emb_tier = await run_in_threadpool(
-                _ingest_text_like, str(storage_path), doc_id, case_id, doc.filename, suffix
+                _ingest_text_like, str(storage_path), doc_id, case_id, doc.filename, suffix, extra_metadata
             )
             chunks = hier["children"]
     except Exception as exc:
@@ -298,6 +354,68 @@ async def upload_document(
         "status": "done",
         "embedding_tier": emb_tier,
         "qdrant_collection": qdrant_coll,
+    }
+
+
+class DocumentMetadataUpdate(BaseModel):
+    """All fields optional; only provided ones are updated."""
+    effective_date: Optional[str] = None   # ISO date string
+    jurisdiction: Optional[str] = None
+    version_tag: Optional[str] = None
+    regulator: Optional[str] = None
+
+
+@router.patch(
+    "/{case_id}/documents/{doc_id}/metadata",
+    summary="Update document metadata (effective_date, jurisdiction, version_tag, regulator)",
+)
+async def update_document_metadata(
+    case_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    body: DocumentMetadataUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_role(UserRole.analyst)),
+):
+    """Patch metadata on a doc + reflect it in every chunk's Qdrant payload.
+
+    Reindexing is lightweight (payload-only update, no re-embed) but requires
+    rewriting all of this doc's points' payloads in the Qdrant collection.
+    """
+    await get_case_for_user(case_id, session, user)
+    doc = await session.get(Document, doc_id)
+    if not doc or doc.case_id != case_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Apply updates (only non-None fields)
+    if body.effective_date is not None:
+        doc.effective_date = _parse_effective_date(body.effective_date)
+    if body.jurisdiction is not None:
+        doc.jurisdiction = body.jurisdiction or None
+    if body.version_tag is not None:
+        doc.version_tag = body.version_tag or None
+    if body.regulator is not None:
+        doc.regulator = body.regulator or None
+
+    session.add(doc)
+    await session.commit()
+    await session.refresh(doc)
+
+    # Rewrite Qdrant payloads for every child chunk of this doc so query-time
+    # filters see the new values.
+    from backend.app.retrieval.vector_store import set_payload_for_doc
+    md = _metadata_payload(doc)
+    try:
+        updated = await run_in_threadpool(set_payload_for_doc, str(doc_id), doc.qdrant_collection, md)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Qdrant payload update failed: {exc}") from exc
+
+    return {
+        "document_id": str(doc_id),
+        "effective_date": doc.effective_date.isoformat() if doc.effective_date else None,
+        "jurisdiction": doc.jurisdiction,
+        "version_tag": doc.version_tag,
+        "regulator": doc.regulator,
+        "qdrant_payloads_updated": updated,
     }
 
 

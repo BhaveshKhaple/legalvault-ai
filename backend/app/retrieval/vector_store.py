@@ -237,3 +237,110 @@ def delete_by_doc(
             total_deleted += count
 
     return total_deleted
+
+
+# ─── Phase 3: metadata filters + payload updates ─────────────────────────────
+
+
+def set_payload_for_doc(
+    doc_id: str,
+    collection_name: str,
+    payload_patch: dict,
+) -> int:
+    """Overwrite the given keys on every point for a doc (payload-only, no re-embed).
+
+    Used by the PATCH metadata endpoint — when a user updates jurisdiction or
+    effective_date on a Document, we rewrite the matching keys on every chunk's
+    Qdrant payload so subsequent query-time filters see the new values.
+
+    Returns the number of points that got updated.
+    """
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+    client = _get_client()
+    existing = {c.name for c in client.get_collections().collections}
+    if collection_name not in existing:
+        return 0
+
+    doc_filter = Filter(
+        must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+    )
+    count = client.count(
+        collection_name=collection_name,
+        count_filter=doc_filter,
+        exact=True,
+    ).count
+    if count == 0:
+        return 0
+
+    # set_payload with no `points=` argument applies to all points matching the filter.
+    client.set_payload(
+        collection_name=collection_name,
+        payload=payload_patch,
+        points=doc_filter,
+    )
+    logger.info("Updated payload on %d points for doc='%s' in '%s'.", count, doc_id, collection_name)
+    return count
+
+
+def build_metadata_filter(
+    case_id: str,
+    date_after: int | None = None,
+    date_before: int | None = None,
+    jurisdiction: str | None = None,
+    version_tag: str | None = None,
+    regulator: str | None = None,
+):
+    """Build a Qdrant Filter combining the mandatory case_id with Phase 3 metadata filters.
+
+    date_after/date_before are unix timestamps (int). Pass None for any field
+    you don't want to filter on.
+    """
+    from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+
+    must = [FieldCondition(key="case_id", match=MatchValue(value=case_id))]
+    if jurisdiction:
+        must.append(FieldCondition(key="jurisdiction", match=MatchValue(value=jurisdiction)))
+    if version_tag:
+        must.append(FieldCondition(key="version_tag", match=MatchValue(value=version_tag)))
+    if regulator:
+        must.append(FieldCondition(key="regulator", match=MatchValue(value=regulator)))
+    if date_after is not None or date_before is not None:
+        rng = Range(gte=date_after, lte=date_before)
+        must.append(FieldCondition(key="effective_date_ts", range=rng))
+
+    return Filter(must=must)
+
+
+def query_with_filter(
+    vector: list[float],
+    qdrant_filter: Any,
+    top_k: int = 30,
+    collection_name: str = _DEFAULT_COLLECTION,
+) -> list[dict]:
+    """Variant of query() that takes a pre-built Qdrant Filter object.
+
+    Needed when callers want to combine case_id with Phase 3 metadata filters
+    (date range + jurisdiction + version + regulator) in one shot.
+    """
+    client = _get_client()
+    existing = {c.name for c in client.get_collections().collections}
+    if collection_name not in existing:
+        return []
+
+    response = client.query_points(
+        collection_name=collection_name,
+        query=vector,
+        query_filter=qdrant_filter,
+        limit=top_k,
+        with_payload=True,
+    )
+
+    return [
+        {
+            "id": str(r.id),
+            "score": float(r.score),
+            "payload": r.payload or {},
+        }
+        for r in response.points
+    ]

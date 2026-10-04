@@ -117,6 +117,14 @@ class Document(SQLModel, table=True):
     qdrant_collection: str = Field(default="legalvault_e5", max_length=50)
     # Human-readable dispatcher decision ("e5_small" | "bge_m3")
     embedding_tier: str = Field(default="e5_small", max_length=20)
+    # ── Phase 3: metadata filters ─────────────────────────────────────────────
+    # All optional. Set at upload time (multipart form) or later via PATCH.
+    # Stamped on every chunk's Qdrant payload so queries can filter server-side.
+    # Date is a UTC date (YYYY-MM-DD) — easy to compare on date_after/before.
+    effective_date: Optional[datetime] = Field(default=None, index=True)
+    jurisdiction: Optional[str] = Field(default=None, max_length=100, index=True)
+    version_tag: Optional[str] = Field(default=None, max_length=100)
+    regulator: Optional[str] = Field(default=None, max_length=100, index=True)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

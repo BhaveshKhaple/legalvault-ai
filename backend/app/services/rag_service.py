@@ -19,9 +19,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from backend.app.models import Chunk, Document
 from backend.app.retrieval.vector_store import (
     COLLECTION_BGE, COLLECTION_E5,
+    build_metadata_filter,
     query as qdrant_query,
     query_all_collections,
+    query_with_filter,
 )
+
+# Phase 3: widen first-stage recall. The cross-encoder narrows to 5 after,
+# so this doesn't hurt LLM latency; it does catch previously-missed chunks
+# that the dense+BM25 top-20 was dropping just outside the cutoff.
+FIRST_STAGE_K = 100
 
 _MODEL_FOR_COLLECTION = {
     COLLECTION_E5: "intfloat/e5-small-v2",
@@ -29,7 +36,12 @@ _MODEL_FOR_COLLECTION = {
 }
 
 
-async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> dict:
+async def run_rag(
+    case_id: uuid.UUID,
+    question: str,
+    session: AsyncSession,
+    metadata_filters: dict | None = None,
+) -> dict:
     """Execute the full RAG pipeline for a question against a case's documents.
 
     Returns:
@@ -97,12 +109,28 @@ async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> d
         for coll in collections_in_case
     }
 
+    # Phase 3: if metadata filters were sent, build a combined Qdrant Filter
+    # and use the filter-aware query path. Otherwise keep the fast legacy path.
+    has_filters = bool(metadata_filters)
     if len(vectors_by_collection) == 1:
         coll, vec = next(iter(vectors_by_collection.items()))
-        dense_results = qdrant_query(vec, str(case_id), top_k=20, collection_name=coll)
+        if has_filters:
+            qf = build_metadata_filter(str(case_id), **metadata_filters)
+            dense_results = query_with_filter(vec, qf, top_k=FIRST_STAGE_K, collection_name=coll)
+        else:
+            dense_results = qdrant_query(vec, str(case_id), top_k=FIRST_STAGE_K, collection_name=coll)
     else:
-        # Mixed-tier case — fan-out, results merged by score before RRF
-        dense_results = query_all_collections(vectors_by_collection, str(case_id), top_k=20)
+        # Mixed-tier case — fan-out, results merged by score before RRF.
+        # (Phase 3 filter applies to each collection in the fan-out.)
+        if has_filters:
+            all_results = []
+            for coll, vec in vectors_by_collection.items():
+                qf = build_metadata_filter(str(case_id), **metadata_filters)
+                all_results.extend(query_with_filter(vec, qf, top_k=FIRST_STAGE_K, collection_name=coll))
+            all_results.sort(key=lambda r: r["score"], reverse=True)
+            dense_results = all_results
+        else:
+            dense_results = query_all_collections(vectors_by_collection, str(case_id), top_k=FIRST_STAGE_K)
 
     # ── 4. Hybrid fusion (RRF) ───────────────────────────────────────────────
     from backend.app.retrieval.hybrid import fuse
