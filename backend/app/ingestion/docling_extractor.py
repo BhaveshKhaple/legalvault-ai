@@ -64,6 +64,20 @@ def extract_docling(path: str) -> list[dict]:
 
     for item, level in res.document.iterate_items():
         text = getattr(item, "text", "")
+        # Phase 2 — table items usually have empty `.text`; export as markdown
+        # so the cell data lands in the index. Without this, fee schedules /
+        # pricing tables silently become empty children and retrieval misses
+        # every numeric fact inside them.
+        label_check = getattr(item, "label", None)
+        label_check_val = getattr(label_check, "value", label_check)
+        if (not text) and label_check_val == "table":
+            try:
+                text = item.export_to_markdown(doc=res.document)
+            except Exception:
+                try:
+                    text = item.export_to_markdown()
+                except Exception:
+                    text = ""
         if text:
             total_text_len += len(text.strip())
 

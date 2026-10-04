@@ -44,10 +44,17 @@ sys.path.insert(0, str(_REPO_ROOT))
 _SCRATCH_QDRANT = Path(tempfile.mkdtemp(prefix="lv_eval_corpus_"))
 os.environ["QDRANT_PATH"] = str(_SCRATCH_QDRANT)
 
-from backend.app.ingestion.clause_chunker import chunk_legal_doc        # noqa: E402
+from backend.app.ingestion.hierarchical_chunker import chunk_hierarchical  # noqa: E402
 from backend.app.ingestion.docx_extractor import extract_docx           # noqa: E402
 from backend.app.ingestion.pdf_extractor import extract_pdf             # noqa: E402
 from backend.app.ingestion.text_extractor import extract_text           # noqa: E402
+
+# Phase 2 — try Docling first; fall back to the plain extractors if it fails
+try:
+    from backend.app.ingestion.docling_extractor import extract_docling  # noqa: E402
+    _HAS_DOCLING = True
+except Exception:
+    _HAS_DOCLING = False
 from backend.app.llm.model_selector import get_model                    # noqa: E402
 from backend.app.retrieval.bm25_index import build_bm25                 # noqa: E402
 from backend.app.retrieval.embeddings import embed, embed_batch         # noqa: E402
@@ -76,6 +83,14 @@ EXTRACTORS = {
 
 
 def _extract(path: Path, fmt: str) -> list[dict]:
+    """Phase 2: prefer Docling for PDF/DOCX so the hierarchical chunker gets
+    heading metadata. TXT and anything Docling can't handle fall back to the
+    plain extractor."""
+    if fmt in {"pdf", "docx"} and _HAS_DOCLING:
+        try:
+            return extract_docling(str(path))
+        except Exception:
+            pass
     try:
         return EXTRACTORS[fmt](str(path))
     except KeyError:
@@ -109,7 +124,12 @@ def _hit_at_k(top: list[dict], needle: str, k: int) -> bool:
 
 
 def _generate_answer(question: str, case_id: str, bm25_index) -> str:
-    """Full RAG with LLM — mirrors backend/app/services/rag_service.run_rag."""
+    """Full RAG with LLM — mirrors rag_service.run_rag with Phase 2 parent swap.
+
+    Retrieval returns children (precise). For the LLM prompt we swap each
+    child for its parent (full section), deduped so a parent is sent at most
+    once even if 2+ children point to it.
+    """
     import uuid as _uuid
     from backend.app.llm.ollama_client import generate
     from backend.app.llm.prompts.citation_prompt import EvidenceChunk, build_citation_prompt
@@ -119,15 +139,24 @@ def _generate_answer(question: str, case_id: str, bm25_index) -> str:
     if not top:
         return "I do not have evidence in the uploaded documents to answer this question."
 
+    _MAX_CONTENT = 1800
+    seen_parents: set[str] = set()
     evidence_chunks = []
     for c in top:
         payload = c.get("payload") or {}
+        parent_key = payload.get("parent_key", "")
+        if parent_key and parent_key in seen_parents:
+            continue  # dedupe — don't send the same parent section twice
+        if parent_key:
+            seen_parents.add(parent_key)
+        content = payload.get("parent_content") or payload.get("content") or ""
+        content = content[:_MAX_CONTENT]
         evidence_chunks.append(EvidenceChunk(
             chunk_id=payload.get("chunk_id") or str(_uuid.uuid4()),
             filename=payload.get("filename") or "doc",
             page=payload.get("page"),
             ts_start=payload.get("ts_start"),
-            content=(payload.get("content") or "")[:600],
+            content=content,
         ))
 
     prompt = build_citation_prompt(question, evidence_chunks)
@@ -177,7 +206,10 @@ def main() -> int:
             continue
 
         pages = _extract(path, d["format"])
-        chunks = chunk_legal_doc(pages) if pages else []
+        # Phase 2 — hierarchical chunker produces parents + children.
+        # Only CHILDREN are embedded and used for retrieval (same as production).
+        hier = chunk_hierarchical(pages) if pages else {"parents": [], "children": []}
+        chunks = hier["children"]
         n_chunks = len(chunks)
         avg_len = int(sum(len(c["content"]) for c in chunks) / n_chunks) if n_chunks else 0
 
@@ -186,6 +218,7 @@ def main() -> int:
             "format": d["format"],
             "pages": len(pages),
             "chunks": n_chunks,
+            "n_parents": len(hier["parents"]),
             "avg_chunk_len": avg_len,
             "structure": d["structure"],
         })
@@ -202,6 +235,17 @@ def main() -> int:
                 "doc_id": d["id"],
                 "chunk_id": f"{d['id']}_c{i}",
                 "content": c["content"],
+                # Phase 2 — bake parent content into the payload so the LLM
+                # eval can swap child→parent at answer-generation time with
+                # no DB lookup. In production rag_service does the same via
+                # Chunk.parent_chunk_id FK.
+                "parent_content": (
+                    hier["parents"][c["parent_index"]]["content"]
+                    if c.get("parent_index") is not None
+                    and 0 <= c["parent_index"] < len(hier["parents"])
+                    else c["content"]
+                ),
+                "parent_key": f"{d['id']}_p{c.get('parent_index', -1)}",
                 "page": c.get("page"),
                 "filename": d["filename"],
                 "section_title": c.get("section_title"),
@@ -286,6 +330,11 @@ def main() -> int:
                 "not covered",
                 "not available in the provided",
                 "not in the documents",
+                "do not contain",
+                "does not contain",
+                "excerpts do not",
+                "no information",
+                "not mentioned",
             ])
             if refused:
                 refusal_hits += 1

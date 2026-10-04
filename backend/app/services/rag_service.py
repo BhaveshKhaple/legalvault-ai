@@ -37,11 +37,16 @@ async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> d
     """
     t0 = time.perf_counter()
 
-    # ── 1. Fetch all chunks for this case (BM25 corpus) ─────────────────────
+    # ── 1. Fetch CHILD chunks for this case (BM25 corpus) ───────────────────
+    # Phase 2: parents live in SQLite but are never indexed. BM25 and Qdrant
+    # both see only children; parents are swapped in at the LLM-context stage.
+    # Legacy rows (no chunk_role set) default to "child" via the model default,
+    # so pre-Phase-2 cases keep working untouched.
     chunks_result = await session.exec(
         select(Chunk)
         .join(Document, Chunk.document_id == Document.id)
         .where(Document.case_id == case_id)
+        .where(Chunk.chunk_role != "parent")
     )
     db_chunks: list[Chunk] = chunks_result.all()
 
@@ -118,21 +123,77 @@ async def run_rag(case_id: uuid.UUID, question: str, session: AsyncSession) -> d
     top_chunks = rerank(question, fused, k=5)
 
     # ── 6. Build citation prompt ─────────────────────────────────────────────
+    # Phase 2 — Parent swap:
+    #   Retrieved top-K chunks are CHILDREN (~200 chars, precise).
+    #   For the LLM we fetch each child's PARENT (~1500 chars, full section)
+    #   and dedupe parents when multiple children point to the same one.
+    #   Evidence shown to the UI stays at child-level for citation precision.
     from backend.app.llm.prompts.citation_prompt import EvidenceChunk, build_citation_prompt
     from backend.app.llm.ollama_client import generate
     from backend.app.llm.model_selector import get_model
 
     tier = get_model()
-    _MAX_CONTENT = 600
+    _MAX_CONTENT = 1800   # bigger budget per chunk now — parents are longer
+
+    # Resolve parent_chunk_id for each retrieved child, then fetch parent texts.
+    # chunk_id in top_chunks is the qdrant point id (string UUID). We look up
+    # the matching Chunk row to get its parent_chunk_id.
+    retrieved_qdrant_ids: list[str] = []
+    for c in top_chunks:
+        cid = c.get("chunk_id") or (c.get("payload") or {}).get("chunk_id")
+        if cid:
+            retrieved_qdrant_ids.append(str(cid))
+
+    # Build child-row map keyed by qdrant_id string, then collect parent IDs.
+    child_rows_by_qid: dict[str, Chunk] = {}
+    if retrieved_qdrant_ids:
+        import uuid as _uuid
+        qdrant_uuids = []
+        for s in retrieved_qdrant_ids:
+            try:
+                qdrant_uuids.append(_uuid.UUID(s))
+            except ValueError:
+                pass
+        if qdrant_uuids:
+            rows = (await session.exec(
+                select(Chunk).where(Chunk.qdrant_id.in_(qdrant_uuids))
+            )).all()
+            for r in rows:
+                child_rows_by_qid[str(r.qdrant_id)] = r
+
+    # Fetch parents in bulk — dedupe keeps the LLM context focused.
+    parent_ids = []
+    seen_parents = set()
+    for c in top_chunks:
+        cid = str(c.get("chunk_id") or (c.get("payload") or {}).get("chunk_id") or "")
+        row = child_rows_by_qid.get(cid)
+        if row and row.parent_chunk_id and row.parent_chunk_id not in seen_parents:
+            parent_ids.append(row.parent_chunk_id)
+            seen_parents.add(row.parent_chunk_id)
+    parents_by_id: dict = {}
+    if parent_ids:
+        parent_rows = (await session.exec(
+            select(Chunk).where(Chunk.id.in_(parent_ids))
+        )).all()
+        parents_by_id = {p.id: p for p in parent_rows}
+
     evidence_chunks: list[EvidenceChunk] = []
     for c in top_chunks:
         payload = c.get("payload", {})
-        content = payload.get("content") or c.get("content", "")
-        content = content[:_MAX_CONTENT] + ("…" if len(content) > _MAX_CONTENT else "")
+        cid = str(c.get("chunk_id") or payload.get("chunk_id") or "")
+        child_row = child_rows_by_qid.get(cid)
+
+        # LLM context: prefer parent text if available; else child text.
+        if child_row and child_row.parent_chunk_id and child_row.parent_chunk_id in parents_by_id:
+            llm_text = parents_by_id[child_row.parent_chunk_id].content
+        else:
+            llm_text = payload.get("content") or c.get("content", "")
+        llm_text = llm_text[:_MAX_CONTENT] + ("…" if len(llm_text) > _MAX_CONTENT else "")
+
         evidence_chunks.append(EvidenceChunk(
-            chunk_id=c.get("chunk_id", ""),
+            chunk_id=cid,
             filename=payload.get("filename", "document"),
-            content=content,
+            content=llm_text,
             page=payload.get("page"),
             ts_start=payload.get("ts_start"),
         ))
