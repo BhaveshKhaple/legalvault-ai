@@ -22,6 +22,59 @@ def get_converter():
     return _converter
 
 
+def _page_sizes(document) -> dict[int, tuple[float, float]]:
+    """Return {page_no: (width, height)} from a DoclingDocument.
+
+    Needed so BOTTOMLEFT-origin bboxes can be flipped to TOPLEFT (what the
+    page-image renderer and the frontend expect). Returns an empty dict if
+    the document doesn't expose page sizes.
+    """
+    out: dict[int, tuple[float, float]] = {}
+    pages = getattr(document, "pages", None)
+    if not pages:
+        return out
+    try:
+        for page_no, page_item in pages.items():
+            size = getattr(page_item, "size", None)
+            if size and hasattr(size, "width") and hasattr(size, "height"):
+                out[page_no] = (float(size.width), float(size.height))
+    except Exception:
+        pass
+    return out
+
+
+def _bbox_from_prov(prov0, page_height: float | None) -> list[float] | None:
+    """Pull [x0, y0, x1, y1] in TOPLEFT origin coords from one ProvenanceItem.
+
+    Docling emits BoundingBox with .l/.t/.r/.b where .t is semantically "top"
+    and .b is "bottom", but numerically those swap depending on coord_origin.
+    This helper always returns TOPLEFT coords with y0 < y1 so downstream
+    overlay math stays trivial.
+    """
+    bb = getattr(prov0, "bbox", None)
+    if bb is None:
+        return None
+    try:
+        l = float(bb.l)
+        t = float(bb.t)
+        r = float(bb.r)
+        b = float(bb.b)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    origin = getattr(bb, "coord_origin", None)
+    origin_name = getattr(origin, "name", None) or getattr(origin, "value", None) or "TOPLEFT"
+    origin_name = str(origin_name).upper()
+    if origin_name == "BOTTOMLEFT" and page_height is not None:
+        # Flip y: top-of-box in TOPLEFT = page_h - top-of-box-in-BOTTOMLEFT
+        new_t = page_height - t
+        new_b = page_height - b
+        t, b = new_t, new_b
+    # Guarantee y0 < y1, x0 < x1 for the overlay layer
+    x0, x1 = (l, r) if l <= r else (r, l)
+    y0, y1 = (t, b) if t <= b else (b, t)
+    return [x0, y0, x1, y1]
+
+
 def extract_docling(path: str) -> list[dict]:
     """Extract text page-by-page from a PDF/DOCX using Docling.
 
@@ -36,10 +89,16 @@ def extract_docling(path: str) -> list[dict]:
                     "text":   str,
                     "page":   int,
                     "doc_id": str,
-                    "items":  list[dict] # { "label": str, "text": str }
+                    "width":  float | None,  # page width in PDF points
+                    "height": float | None,  # page height in PDF points
+                    "items":  list[dict]     # { "label", "heading_level", "text",
+                                             #   "level", "bbox": [x0,y0,x1,y1] | None }
                 },
                 ...
             ]
+
+        bbox is in TOPLEFT origin, PDF-point units (72 DPI). Suitable for
+        overlaying on a PyMuPDF-rendered PNG by scaling with the render DPI.
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -59,6 +118,7 @@ def extract_docling(path: str) -> list[dict]:
     except Exception as exc:
         raise ValueError(f"Docling cannot convert '{file_path.name}': {exc}") from exc
 
+    page_sizes = _page_sizes(res.document)
     pages_map = {}
     total_text_len = 0
 
@@ -90,12 +150,18 @@ def extract_docling(path: str) -> list[dict]:
             page_no = 1
 
         if page_no not in pages_map:
+            width, height = page_sizes.get(page_no, (None, None))
             pages_map[page_no] = {
                 "text": [],
                 "page": page_no,
                 "doc_id": doc_id,
+                "width": width,
+                "height": height,
                 "items": [],
             }
+
+        page_h = pages_map[page_no]["height"]
+        bbox = _bbox_from_prov(prov[0], page_h) if (prov and len(prov) > 0) else None
 
         # Determine heading level logic (H1/H2/H3/body/table)
         label_val = getattr(item, "label", "unknown")
@@ -127,6 +193,7 @@ def extract_docling(path: str) -> list[dict]:
                 "heading_level": meta_label,
                 "text": text,
                 "level": level,
+                "bbox": bbox,
             }
         )
         if text:
