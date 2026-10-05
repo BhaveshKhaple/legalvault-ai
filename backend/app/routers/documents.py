@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlmodel import select
@@ -87,6 +87,13 @@ router = APIRouter()
 _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"}
 _TEXT_SUFFIXES = {".txt", ".docx"}
 _ALLOWED_SUFFIXES = {".pdf"} | _AUDIO_SUFFIXES | _TEXT_SUFFIXES
+
+# UI citation preview — fixed render scale for the page-image endpoint.
+# PDF points are 72 DPI; a 2x matrix renders at 144 DPI, which is crisp on
+# retina screens and keeps bbox→pixel math trivial: pixel_x = bbox_x * SCALE.
+# Both backend and frontend hardcode this; changing it is a breaking contract.
+PAGE_IMAGE_RENDER_SCALE = 2
+_PAGE_CACHE_DIR = Path("./data/page_cache")
 
 
 # ─── sync ingestion helpers (run in thread pool) ─────────────────────────────
@@ -456,6 +463,82 @@ async def doc_status(
     }
 
 
+def _render_page_png(pdf_path: str, page_number: int, cache_path: Path) -> bytes:
+    """Render one PDF page to PNG at PAGE_IMAGE_RENDER_SCALE, cache, return bytes.
+
+    page_number is 1-based (matches the DB / UI). Raises IndexError if the
+    page is out of range so the caller can translate to a 404.
+    """
+    import pymupdf
+
+    with pymupdf.open(pdf_path) as pdf:
+        total = pdf.page_count
+        if not (1 <= page_number <= total):
+            raise IndexError(f"page {page_number} out of range (1..{total})")
+        page = pdf.load_page(page_number - 1)
+        mat = pymupdf.Matrix(PAGE_IMAGE_RENDER_SCALE, PAGE_IMAGE_RENDER_SCALE)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        png_bytes = pix.tobytes("png")
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(png_bytes)
+    return png_bytes
+
+
+@router.get(
+    "/{case_id}/documents/{doc_id}/page-image",
+    summary="Render one page of a PDF to PNG for the citation-preview overlay",
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def doc_page_image(
+    case_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    page: int = Query(..., ge=1, description="1-based page number"),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Return a PNG of the requested PDF page, cached to disk.
+
+    Scale is fixed at PAGE_IMAGE_RENDER_SCALE (2x) so the frontend can map
+    bbox coordinates to pixels with a single multiplication. Non-PDF
+    documents return 400 — audio and text have no page geometry to render.
+    """
+    await get_case_for_user(case_id, session, user)
+    doc = await session.get(Document, doc_id)
+    if not doc or doc.case_id != case_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.doc_type != FileType.pdf:
+        raise HTTPException(
+            status_code=400,
+            detail="page-image is only available for PDF documents",
+        )
+
+    cache_path = _PAGE_CACHE_DIR / f"{doc_id}_p{page}.png"
+    if cache_path.exists():
+        png_bytes = cache_path.read_bytes()
+    else:
+        try:
+            png_bytes = await run_in_threadpool(
+                _render_page_png, doc.storage_path, page, cache_path
+            )
+        except IndexError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=410,
+                detail="Underlying PDF file is missing on disk",
+            ) from exc
+
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-Render-Scale": str(PAGE_IMAGE_RENDER_SCALE),
+        },
+    )
+
+
 @router.delete(
     "/{case_id}/documents/{doc_id}", summary="Delete document and its vectors"
 )
@@ -476,6 +559,12 @@ async def delete_document(
     removed = await run_in_threadpool(delete_by_doc, str(doc_id), coll)
 
     Path(doc.storage_path).unlink(missing_ok=True)
+
+    # Purge any cached page-image PNGs so the disk cache doesn't leak.
+    if _PAGE_CACHE_DIR.exists():
+        for cached in _PAGE_CACHE_DIR.glob(f"{doc_id}_p*.png"):
+            cached.unlink(missing_ok=True)
+
     await session.delete(doc)
     await session.commit()
     return {"deleted": True, "chunks_removed": removed}
