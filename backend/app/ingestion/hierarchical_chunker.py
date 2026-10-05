@@ -64,6 +64,22 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Zऀ-ॿ])|(?<=;)\s+")
 _NUMBERED_CLAUSE = re.compile(r"^(?P<num>\d+\.\d+(?:\.\d+)*\.?|\d+\.)\s+")
 
 
+def _union_bboxes(bboxes: list[list[float]]) -> list[float] | None:
+    """Merge N bboxes into their axis-aligned bounding rectangle.
+
+    Used by the Docling path when several short items are merged into one
+    child chunk — the resulting highlight is one rectangle covering every
+    contributing item. Returns None if the input is empty.
+    """
+    if not bboxes:
+        return None
+    x0 = min(bb[0] for bb in bboxes)
+    y0 = min(bb[1] for bb in bboxes)
+    x1 = max(bb[2] for bb in bboxes)
+    y1 = max(bb[3] for bb in bboxes)
+    return [x0, y0, x1, y1]
+
+
 def _split_long_paragraph(text: str, max_chars: int) -> list[str]:
     """Split a paragraph that exceeds max_chars into sub-chunks on sentence boundaries."""
     text = text.strip()
@@ -244,13 +260,15 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
 
     # Pending merge buffer — body items under CHILD_MERGE_BELOW_CHARS get
     # concatenated until buf length crosses the threshold or we hit a boundary
-    # (heading, table, parent change).
+    # (heading, table, parent change). `pending_bboxes` accumulates every
+    # contributing item's bbox so the emitted child carries the union rect.
     pending_text: str = ""
     pending_page: int | None = None
     pending_parent_idx: int = -1
+    pending_bboxes: list[list[float]] = []
 
     def flush_pending():
-        nonlocal pending_text, pending_page, pending_parent_idx
+        nonlocal pending_text, pending_page, pending_parent_idx, pending_bboxes
         if pending_text.strip() and 0 <= pending_parent_idx < len(parents):
             children.append({
                 "chunk_role": "child",
@@ -259,10 +277,12 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                 "section_title": parents[pending_parent_idx].get("section_title"),
                 "parent_index": pending_parent_idx,
                 "is_table": False,
+                "bbox": _union_bboxes(pending_bboxes),
             })
         pending_text = ""
         pending_page = None
         pending_parent_idx = -1
+        pending_bboxes = []
 
     for page in pages:
         page_no = page.get("page", 1)
@@ -276,6 +296,7 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
             if not text:
                 continue
             label = raw.get("heading_level") or raw.get("label") or "body"
+            item_bbox = raw.get("bbox")
 
             # Table — atomic child, flush pending prose first
             if _is_table(label):
@@ -289,6 +310,7 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                             "section_title": p.get("section_title"),
                             "parent_index": idx,
                             "is_table": True,
+                            "bbox": item_bbox,
                         })
                         break
                 continue
@@ -314,7 +336,10 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
             if pending_parent_idx != -1 and pending_parent_idx != parent_cursor:
                 flush_pending()
 
-            # Long item → split into normal-sized children, flush pending first
+            # Long item → split into normal-sized children, flush pending first.
+            # Every split piece inherits the whole item's bbox — we can't carve
+            # it up by sentence without char-offset math, and the slight
+            # over-highlight is acceptable for the preview overlay.
             if len(text) > CHILD_MERGE_BELOW_CHARS:
                 flush_pending()
                 for piece in _split_long_paragraph(text, CHILD_MAX_CHARS):
@@ -325,6 +350,7 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                         "section_title": parents[parent_cursor].get("section_title") if parents else None,
                         "parent_index": parent_cursor,
                         "is_table": False,
+                        "bbox": item_bbox,
                     })
                 continue
 
@@ -335,6 +361,12 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                 pending_text = text
                 pending_page = page_no
                 pending_parent_idx = parent_cursor
+
+            # Only union bboxes from items on the same page as the buffer's
+            # declared `page_no` — a mixed-page union would be meaningless
+            # for a single-page overlay.
+            if item_bbox is not None and page_no == pending_page:
+                pending_bboxes.append(item_bbox)
 
             if len(pending_text) >= CHILD_TARGET_CHARS:
                 flush_pending()
@@ -422,6 +454,7 @@ def _chunk_fallback_pages(pages: list[dict]) -> dict:
                 "section_title": ch.get("section_title"),
                 "parent_index": parent_cursor,
                 "is_table": False,
+                "bbox": None,  # non-Docling extractors don't carry bbox info
             })
 
     return {"parents": parents, "children": children}

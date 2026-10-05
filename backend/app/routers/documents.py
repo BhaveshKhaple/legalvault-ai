@@ -176,6 +176,7 @@ def _ingest_text_like(
             "embedding_tier": decision.tier,
             "chunk_role": "child",
             "is_table": ch.get("is_table", False),
+            "bbox": ch.get("bbox"),  # UI citation preview: TOPLEFT [x0,y0,x1,y1] or None
             **md,  # Phase 3: effective_date_ts, jurisdiction, version_tag, regulator
         }
         for ch in children

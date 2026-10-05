@@ -19,6 +19,21 @@ def _docling_page(items, page=1):
     }
 
 
+def _docling_page_with_bboxes(items, page=1, width=612.0, height=792.0):
+    """Like _docling_page but each item carries its own bbox tuple."""
+    return {
+        "text": "\n".join(t for _, t, _ in items),
+        "page": page,
+        "doc_id": "d",
+        "width": width,
+        "height": height,
+        "items": [
+            {"heading_level": lbl, "text": txt, "page": page, "bbox": bb}
+            for lbl, txt, bb in items
+        ],
+    }
+
+
 class TestDoclingHierarchy:
     def test_single_section_produces_one_parent_and_children(self):
         # Each body > CHILD_MERGE_BELOW_CHARS (180) so they stay separate.
@@ -116,6 +131,64 @@ class TestDoclingHierarchy:
         assert all(c["parent_index"] == 0 for c in r["children"])
         for c in r["children"]:
             assert len(c["content"]) <= CHILD_MAX_CHARS + 50  # +50 sentence slack
+
+
+class TestBboxThreading:
+    def test_long_item_child_inherits_item_bbox(self):
+        long_body = (
+            "This agreement is governed by the laws of India. "
+            "Any dispute arising under this agreement shall be subject to the "
+            "exclusive jurisdiction of the courts at Pune, Maharashtra. "
+            "The parties waive any claim to a different venue. "
+            "Service of process may be effected by registered mail at the "
+            "address of record maintained with the registrar of companies."
+        )
+        assert len(long_body) > 180  # above CHILD_MERGE_BELOW_CHARS
+        pages = [_docling_page_with_bboxes([
+            ("H1", "Governing Law", [50.0, 60.0, 500.0, 80.0]),
+            ("body", long_body, [50.0, 100.0, 500.0, 300.0]),
+        ])]
+        r = chunk_hierarchical(pages)
+        body_children = [c for c in r["children"] if not c.get("is_table")]
+        assert body_children
+        for c in body_children:
+            assert c["bbox"] == [50.0, 100.0, 500.0, 300.0]
+
+    def test_short_merged_items_union_their_bboxes(self):
+        # Two short Q/A items on the same page get merged into one child;
+        # the child's bbox is the min-x/min-y/max-x/max-y rectangle.
+        pages = [_docling_page_with_bboxes([
+            ("H1", "FAQ", [50.0, 40.0, 500.0, 60.0]),
+            ("body", "Q: Does it run offline?", [60.0, 100.0, 400.0, 120.0]),
+            ("body", "A: Yes, fully local.",     [60.0, 125.0, 420.0, 145.0]),
+        ])]
+        r = chunk_hierarchical(pages)
+        body_children = [c for c in r["children"] if not c.get("is_table")]
+        assert len(body_children) == 1
+        bb = body_children[0]["bbox"]
+        assert bb == [60.0, 100.0, 420.0, 145.0]
+
+    def test_table_child_carries_item_bbox(self):
+        pages = [_docling_page_with_bboxes([
+            ("H1", "Fees", [50.0, 40.0, 500.0, 60.0]),
+            ("table", "Service | Amount\nSetup | 10000", [50.0, 200.0, 560.0, 340.0]),
+        ])]
+        r = chunk_hierarchical(pages)
+        table_children = [c for c in r["children"] if c.get("is_table")]
+        assert len(table_children) == 1
+        assert table_children[0]["bbox"] == [50.0, 200.0, 560.0, 340.0]
+
+    def test_items_without_bbox_yield_none(self):
+        # Pages without bbox info (fallback extractors) still produce children,
+        # just with bbox=None so downstream code can detect and skip overlay.
+        pages = [_docling_page([
+            ("H1", "FAQ"),
+            ("body", "Q: Does it run offline?"),
+            ("body", "A: Yes, fully local."),
+        ])]
+        r = chunk_hierarchical(pages)
+        assert all("bbox" in c for c in r["children"])
+        assert all(c["bbox"] is None for c in r["children"])
 
     def test_child_role_and_table_flag_set(self):
         pages = [_docling_page([("H1", "X"), ("body", "y"), ("table", "a|b\nc|d")])]
