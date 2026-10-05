@@ -156,8 +156,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .tab.active { color: var(--navy-800); border-bottom-color: var(--navy-800); }
 
 /* Search tab */
-.query-layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
-@media (max-width: 900px) { .query-layout { grid-template-columns: 1fr; } }
 .query-bar-wrap { position: relative; margin-bottom: 24px; }
 .query-input { width: 100%; padding: 12px 48px 12px 16px; border: 1px solid var(--line);
   border-radius: var(--r8); font-family: 'IBM Plex Sans', sans-serif; font-size: 15px;
@@ -183,15 +181,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
   text-decoration: none; cursor: pointer; }
 .answer-meta { font-size: 12px; color: var(--ink-3); margin-top: 14px;
   padding-top: 12px; border-top: 1px solid var(--line-2); font-family: 'IBM Plex Mono', monospace; }
-.evidence-rail { position: sticky; top: 24px; }
-.rail-title { font-size: 12px; font-weight: 600; color: var(--ink-3);
-  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
-.evidence-card { padding: 14px 16px; margin-bottom: 10px; }
-.evidence-ref { font-size: 11px; font-family: 'IBM Plex Mono', monospace;
-  color: var(--gold-deep); font-weight: 500; margin-bottom: 6px; }
-.evidence-snippet { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
-.evidence-score { font-size: 11px; color: var(--ink-3); margin-top: 8px;
-  font-family: 'IBM Plex Mono', monospace; }
 .empty-state { text-align: center; padding: 60px 24px; }
 .empty-icon { font-size: 36px; margin-bottom: 12px; }
 .empty-title { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
@@ -268,6 +257,67 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .missing-chip svg { fill: var(--ink-3); width: 12px; height: 12px; }
 .shield-audit-meta { font-size: 11px; color: var(--ink-3); font-family: 'IBM Plex Mono', monospace;
   padding: 10px 0; border-top: 1px solid var(--line-2); margin-top: 20px; }
+
+/* ══════════════════════════════════════════════════════════════
+   UI CITATION PREVIEW (Module 12.3)
+   Evidence rail -> clickable chips -> slide-in page preview with
+   yellow bbox overlay. 2x render scale shared with the backend.
+══════════════════════════════════════════════════════════════ */
+.evidence-rail-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.evidence-chip-link { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 20px; background: var(--surface);
+  font-size: 12px; color: var(--ink-2); cursor: pointer;
+  transition: background 150ms var(--ease), border-color 150ms var(--ease), color 150ms var(--ease);
+  font-family: 'IBM Plex Mono', monospace; }
+.evidence-chip-link:hover { background: var(--navy-100); border-color: var(--navy-700); color: var(--navy-700); }
+.evidence-chip-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--navy-700); }
+.evidence-chip-rank { font-weight: 600; color: var(--gold-deep); }
+.evidence-chip-score { color: var(--ink-3); font-size: 11px; }
+.evidence-chip-nobbox { opacity: 0.65; cursor: default; }
+.evidence-chip-nobbox:hover { background: var(--surface); border-color: var(--line); color: var(--ink-2); }
+
+/* Extractor badge on document cards */
+.extractor-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border-radius: 20px; font-size: 11px; font-weight: 500;
+  font-family: 'IBM Plex Mono', monospace; margin-left: 6px; }
+.extractor-badge-docling { background: var(--green-tint); color: var(--green); }
+.extractor-badge-fallback { background: var(--amber-tint); color: var(--amber); }
+
+/* Right-side slide-in citation preview panel */
+.cit-panel { position: fixed; top: 0; right: 0; width: 40%; min-width: 420px;
+  height: 100vh; background: var(--surface); border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgba(15, 31, 58, 0.08);
+  transform: translateX(100%); transition: transform 280ms var(--ease);
+  z-index: 150; display: flex; flex-direction: column; }
+.cit-panel.open { transform: translateX(0); }
+.cit-panel-header { display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.cit-panel-title { font-size: 14px; font-weight: 600; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 12px; }
+.cit-panel-close { background: transparent; border: none; cursor: pointer;
+  width: 28px; height: 28px; border-radius: var(--r4); color: var(--ink-2);
+  display: flex; align-items: center; justify-content: center; }
+.cit-panel-close:hover { background: var(--line-2); color: var(--ink); }
+.cit-panel-nav { display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 18px; border-bottom: 1px solid var(--line-2); background: var(--surface); }
+.cit-panel-nav-btn { background: transparent; border: 1px solid var(--line);
+  border-radius: var(--r4); padding: 4px 10px; font-size: 12px; color: var(--ink-2);
+  cursor: pointer; font-family: inherit; }
+.cit-panel-nav-btn:hover { background: var(--paper); color: var(--ink); }
+.cit-panel-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.cit-page-label { font-size: 12px; color: var(--ink-3);
+  font-family: 'IBM Plex Mono', monospace; }
+.cit-panel-body { flex: 1; overflow: auto; padding: 16px; background: var(--paper);
+  display: flex; justify-content: center; align-items: flex-start; }
+.cit-page-wrap { position: relative; display: inline-block;
+  background: var(--surface); box-shadow: 0 2px 12px rgba(15, 31, 58, 0.12); }
+.cit-page-img { display: block; max-width: 100%; height: auto; }
+.cit-overlay { position: absolute; background: rgba(234, 179, 8, 0.32);
+  border: 2px solid rgba(169, 129, 47, 0.95); pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.6) inset;
+  transition: opacity 150ms var(--ease); }
+.cit-panel-empty { color: var(--ink-3); font-size: 13px; padding: 40px 20px;
+  text-align: center; }
 
 /* ── Toasts ────────────────────────────────────────────────────────────── */
 .toast-area { position: fixed; bottom: 24px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
@@ -484,6 +534,24 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
   </div>
 </div>
 
+<!-- Citation preview panel (right-side slide-in) -->
+<aside id="cit-panel" class="cit-panel" aria-hidden="true" aria-label="Citation preview">
+  <div class="cit-panel-header">
+    <div class="cit-panel-title" id="cit-panel-title">Citation preview</div>
+    <button class="cit-panel-close" onclick="closeCitationPanel()" aria-label="Close preview">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    </button>
+  </div>
+  <div class="cit-panel-nav">
+    <button class="cit-panel-nav-btn" id="cit-prev-btn" onclick="citPanelPage(-1)">← Prev</button>
+    <span class="cit-page-label" id="cit-page-label">p.—</span>
+    <button class="cit-panel-nav-btn" id="cit-next-btn" onclick="citPanelPage(1)">Next →</button>
+  </div>
+  <div class="cit-panel-body" id="cit-panel-body">
+    <div class="cit-panel-empty">Click a citation chip to preview the source page.</div>
+  </div>
+</aside>
+
 <!-- Toast area -->
 <div class="toast-area" id="toast-area"></div>
 
@@ -641,6 +709,133 @@ async function loadCases() {
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+/* ── Extractor badge (Module 12.3) ──────────────────────────────────────── */
+// Green badge when Docling parsed the doc with layout + bbox fidelity; amber
+// for any fallback (pymupdf, docx, text, whisper, unknown) so users can see
+// at a glance which docs will support the yellow bbox highlight.
+function extractorBadgeHtml(extractor) {
+  if (!extractor || extractor === 'unknown') return '';
+  if (extractor === 'docling') {
+    return ` <span class="extractor-badge extractor-badge-docling" title="Parsed by Docling — bbox-level citations available">Docling</span>`;
+  }
+  const label = extractor.charAt(0).toUpperCase() + extractor.slice(1);
+  return ` <span class="extractor-badge extractor-badge-fallback" title="Parsed by ${esc(extractor)} fallback — citations show page only, no bbox overlay">${esc(label)}</span>`;
+}
+
+/* ── Citation preview panel (Module 12.3) ───────────────────────────────── */
+// Must match PAGE_IMAGE_RENDER_SCALE in backend/app/routers/documents.py.
+// Breaking contract — bump both sides together or the overlay drifts.
+const PAGE_IMAGE_RENDER_SCALE = 2;
+
+let citState = { caseId: null, docId: null, filename: null, originPage: null,
+                 currentPage: null, bbox: null, pageCount: null };
+
+function openCitationFromEvidence(idx) {
+  const ev = (window.__lastEvidence || [])[idx];
+  if (!ev || !ev.doc_id || !ev.page) {
+    toast('No preview available for this citation', 'err');
+    return;
+  }
+  const doc = currentDocs.find(d => d.document_id === ev.doc_id);
+  citState = {
+    caseId: currentCaseId,
+    docId: ev.doc_id,
+    filename: ev.filename || 'document',
+    originPage: ev.page,
+    currentPage: ev.page,
+    bbox: ev.bbox || null,
+    pageCount: doc ? doc.page_count : null,
+  };
+  document.getElementById('cit-panel-title').textContent =
+    `${citState.filename} · p.${citState.originPage}`;
+  document.getElementById('cit-panel').classList.add('open');
+  document.getElementById('cit-panel').setAttribute('aria-hidden', 'false');
+  loadCitationPage();
+}
+
+function closeCitationPanel() {
+  const panel = document.getElementById('cit-panel');
+  panel.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+}
+
+async function loadCitationPage() {
+  const body = document.getElementById('cit-panel-body');
+  const label = document.getElementById('cit-page-label');
+  const prev = document.getElementById('cit-prev-btn');
+  const next = document.getElementById('cit-next-btn');
+  label.textContent = `p.${citState.currentPage}` +
+    (citState.pageCount ? ` / ${citState.pageCount}` : '');
+  prev.disabled = citState.currentPage <= 1;
+  next.disabled = citState.pageCount ? citState.currentPage >= citState.pageCount : false;
+
+  body.innerHTML = '<div class="cit-panel-empty">Rendering page…</div>';
+  try {
+    const tok = getToken();
+    const url = `${API}/v1/cases/${citState.caseId}/documents/${citState.docId}/page-image?page=${citState.currentPage}`;
+    const r = await fetch(url, { headers: tok ? {'Authorization': `Bearer ${tok}`} : {} });
+    if (r.status === 401 || r.status === 403) {
+      clearToken(); show('screen-login');
+      throw new Error('Session expired');
+    }
+    if (!r.ok) throw new Error(await r.text() || r.statusText);
+    const blob = await r.blob();
+    const objUrl = URL.createObjectURL(blob);
+
+    body.innerHTML = `
+      <div class="cit-page-wrap" id="cit-page-wrap">
+        <img id="cit-page-img" class="cit-page-img" src="${objUrl}" alt="page ${citState.currentPage}">
+        <div id="cit-overlay" class="cit-overlay" style="display:none;"></div>
+      </div>`;
+    const img = document.getElementById('cit-page-img');
+    img.addEventListener('load', () => {
+      URL.revokeObjectURL(objUrl);
+      positionOverlay(img);
+    });
+    img.addEventListener('error', () => {
+      URL.revokeObjectURL(objUrl);
+      body.innerHTML = '<div class="cit-panel-empty">Could not render this page.</div>';
+    });
+  } catch (e) {
+    body.innerHTML = `<div class="cit-panel-empty">Preview failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function positionOverlay(img) {
+  const overlay = document.getElementById('cit-overlay');
+  if (!overlay) return;
+  // Only draw the overlay on the originally cited page — the bbox doesn't
+  // apply to other pages the user may navigate to.
+  if (!citState.bbox || citState.currentPage !== citState.originPage) {
+    overlay.style.display = 'none';
+    return;
+  }
+  const [x0, y0, x1, y1] = citState.bbox;
+  const pageWpt = img.naturalWidth / PAGE_IMAGE_RENDER_SCALE;
+  const pageHpt = img.naturalHeight / PAGE_IMAGE_RENDER_SCALE;
+  if (!pageWpt || !pageHpt) { overlay.style.display = 'none'; return; }
+  overlay.style.left = (x0 / pageWpt * 100) + '%';
+  overlay.style.top = (y0 / pageHpt * 100) + '%';
+  overlay.style.width = ((x1 - x0) / pageWpt * 100) + '%';
+  overlay.style.height = ((y1 - y0) / pageHpt * 100) + '%';
+  overlay.style.display = 'block';
+}
+
+function citPanelPage(delta) {
+  const next = citState.currentPage + delta;
+  if (next < 1) return;
+  if (citState.pageCount && next > citState.pageCount) return;
+  citState.currentPage = next;
+  loadCitationPage();
+}
+
+// Close on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('cit-panel')?.classList.contains('open')) {
+    closeCitationPanel();
+  }
+});
+
 async function deleteCase(caseId) {
   if (!confirm('Delete this case and all its documents? This cannot be undone.')) return;
   try {
@@ -732,27 +927,33 @@ async function runQuery() {
 
 function renderAnswer(res, question) {
   const evidence = res.evidence || [];
-  const evidenceHtml = evidence.length ? evidence.map((e,i) => `
-    <div class="card evidence-card">
-      <div class="evidence-ref">[${i+1}] ${esc(e.filename||'document')}${e.page ? ` p.${e.page}` : e.ts_start ? ` t.${e.ts_start}s` : ''}${e.section_title ? ` · ${esc(e.section_title)}` : ''}</div>
-      <div class="evidence-snippet">${esc(e.content.slice(0,240))}${e.content.length>240?'…':''}</div>
-      <div class="evidence-score">score ${(e.score*100).toFixed(0)}%</div>
-    </div>`).join('') : '<div style="color:var(--ink-3);font-size:13px;">No evidence retrieved.</div>';
+  // Stash evidence so chip clicks can look them up by index without quoting
+  // long JSON into every onclick handler.
+  window.__lastEvidence = evidence;
+
+  const chipsHtml = evidence.length ? `
+    <div class="evidence-rail-chips" id="evidence-chips">
+      ${evidence.map((e, i) => {
+        const hasPage = !!e.page && !!e.doc_id;
+        const label = `${esc(e.filename || 'document')}${e.page ? ' · p.' + e.page : e.ts_start ? ' · t.' + e.ts_start + 's' : ''}`;
+        const score = `${(e.score * 100).toFixed(0)}%`;
+        const cls = hasPage ? 'evidence-chip-link' : 'evidence-chip-link evidence-chip-nobbox';
+        const click = hasPage ? `onclick="openCitationFromEvidence(${i})"` : 'title="Preview unavailable (audio or non-PDF source)"';
+        return `<button type="button" class="${cls}" ${click}>
+          <span class="evidence-chip-rank">[${i + 1}]</span>
+          <span>${label}</span>
+          <span class="evidence-chip-score">${score}</span>
+        </button>`;
+      }).join('')}
+    </div>` : '<div style="color:var(--ink-3);font-size:13px;margin-top:16px;">No evidence retrieved.</div>';
 
   document.getElementById('query-result').innerHTML = `
-    <div class="query-layout">
-      <div>
-        <div class="card answer-card">
-          <div class="answer-heading">${esc(question)}</div>
-          <div class="answer-body">${esc(res.answer)}</div>
-          <div class="answer-meta">confidence ${(res.confidence*100).toFixed(0)}% · ${res.latency_ms}ms · ${evidence.length} source${evidence.length!==1?'s':''} · audit logged · append-only</div>
-        </div>
-      </div>
-      <div class="evidence-rail">
-        <div class="rail-title">Evidence</div>
-        ${evidenceHtml}
-      </div>
-    </div>`;
+    <div class="card answer-card">
+      <div class="answer-heading">${esc(question)}</div>
+      <div class="answer-body">${esc(res.answer)}</div>
+      <div class="answer-meta">confidence ${(res.confidence*100).toFixed(0)}% · ${res.latency_ms}ms · ${evidence.length} source${evidence.length!==1?'s':''} · audit logged · append-only</div>
+    </div>
+    ${chipsHtml}`;
 }
 
 /* ── Documents tab ──────────────────────────────────────────────────────── */
@@ -774,7 +975,7 @@ function renderDocList() {
     <li class="doc-item" data-doc-id="${d.document_id}">
       <div class="doc-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg></div>
       <div class="doc-info">
-        <div class="doc-name">${esc(d.filename)}</div>
+        <div class="doc-name">${esc(d.filename)}${extractorBadgeHtml(d.extractor_used)}</div>
         <div class="doc-meta-line">${d.page_count ? d.page_count + ' pages · ' : ''}${d.doc_type} · ${fmtDate(d.created_at)}
         ${d.status === 'error' ? ' · <span style="color:var(--red)">Failed — re-upload</span>' : ''}
         </div>
