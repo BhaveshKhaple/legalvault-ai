@@ -99,11 +99,11 @@ def _ingest_text_like(
     filename: str,
     suffix: str,
     extra_metadata: Optional[dict] = None,
-) -> tuple[dict, str, str]:
+) -> tuple[dict, str, str, str]:
     """Extract → hierarchical chunk → dispatch → embed children → index to Qdrant.
 
     Returns:
-        ({"parents": [...], "children": [... with qdrant_id]}, qdrant_collection, embedding_tier)
+        ({"parents": [...], "children": [... with qdrant_id]}, qdrant_collection, embedding_tier, extractor_used)
 
     Only CHILDREN are embedded + indexed to Qdrant. Parents stay in SQLite
     and are swapped in at the LLM-context stage of rag_service.run_rag().
@@ -113,17 +113,22 @@ def _ingest_text_like(
     from backend.app.retrieval.embeddings import embed_batch
     from backend.app.retrieval.vector_store import insert
 
+    extractor_used = "unknown"
+
     # ── 1. Extract pages (Docling for PDF/DOCX, fallbacks for TXT/legacy) ────
     if suffix == ".pdf":
         from backend.app.ingestion.docling_extractor import extract_docling
         from backend.app.ingestion.pdf_extractor import extract_pdf
         try:
             pages = extract_docling(path)
+            extractor_used = "docling"
         except RuntimeError:
             pages = extract_pdf(path)
+            extractor_used = "pymupdf"
         except Exception as exc:
             if "DocumentConversionError" in type(exc).__name__:
                 pages = extract_pdf(path)
+                extractor_used = "pymupdf"
             else:
                 raise
     elif suffix == ".docx":
@@ -131,16 +136,19 @@ def _ingest_text_like(
         from backend.app.ingestion.docx_extractor import extract_docx
         try:
             pages = extract_docling(path)
+            extractor_used = "docling"
         except Exception:
             pages = extract_docx(path)
+            extractor_used = "docx"
     elif suffix == ".txt":
         from backend.app.ingestion.text_extractor import extract_text
         pages = extract_text(path)
+        extractor_used = "text"
     else:
         raise ValueError(f"No text extractor registered for '{suffix}'")
 
     if not pages:
-        return {"parents": [], "children": []}, "legalvault_e5", "e5_small"
+        return {"parents": [], "children": []}, "legalvault_e5", "e5_small", extractor_used
 
     # ── 2. Dispatcher picks embedding tier (based on file size/lang/pages) ────
     decision = dispatch(file_path=path, pages=pages)
@@ -151,7 +159,7 @@ def _ingest_text_like(
     children = hier["children"]
 
     if not children:
-        return {"parents": parents, "children": []}, decision.collection_name, decision.tier
+        return {"parents": parents, "children": []}, decision.collection_name, decision.tier, extractor_used
 
     # ── 4. Embed only children ────────────────────────────────────────────────
     texts = [ch["content"] for ch in children]
@@ -176,7 +184,7 @@ def _ingest_text_like(
     for ch, qid in zip(children, qdrant_ids):
         ch["qdrant_id"] = qid
 
-    return {"parents": parents, "children": children}, decision.collection_name, decision.tier
+    return {"parents": parents, "children": children}, decision.collection_name, decision.tier, extractor_used
 
 
 def _ingest_audio(
@@ -184,8 +192,11 @@ def _ingest_audio(
     doc_id: uuid.UUID,
     case_id: uuid.UUID,
     filename: str,
-) -> tuple[list[dict], str, str]:
-    """Transcribe + embed audio. Always uses e5-small-v2 (audio is always English-first)."""
+) -> tuple[list[dict], str, str, str]:
+    """Transcribe + embed audio. Always uses e5-small-v2 (audio is always English-first).
+
+    Returns (chunks, qdrant_collection, embedding_tier, extractor_used="whisper").
+    """
     from backend.app.ingestion.audio_transcriber import transcribe_audio
     from backend.app.retrieval.embeddings import embed_batch
     from backend.app.retrieval.vector_store import COLLECTION_E5, insert
@@ -202,7 +213,7 @@ def _ingest_audio(
         for s in segments if s.get("text", "").strip()
     ]
     if not chunks:
-        return [], COLLECTION_E5, "e5_small"
+        return [], COLLECTION_E5, "e5_small", "whisper"
 
     texts = [ch["content"] for ch in chunks]
     vectors = embed_batch(texts, model_name="intfloat/e5-small-v2")
@@ -223,7 +234,7 @@ def _ingest_audio(
     for ch, qid in zip(chunks, qdrant_ids):
         ch["qdrant_id"] = qid
 
-    return chunks, COLLECTION_E5, "e5_small"
+    return chunks, COLLECTION_E5, "e5_small", "whisper"
 
 
 # ─── endpoints ───────────────────────────────────────────────────────────────
@@ -279,7 +290,7 @@ async def upload_document(
 
     try:
         if suffix in _AUDIO_SUFFIXES:
-            audio_chunks, qdrant_coll, emb_tier = await run_in_threadpool(
+            audio_chunks, qdrant_coll, emb_tier, extractor_used = await run_in_threadpool(
                 _ingest_audio, str(storage_path), doc_id, case_id, doc.filename
             )
             # Audio path has no parent-child hierarchy; wrap flat chunks for the
@@ -287,7 +298,7 @@ async def upload_document(
             hier = {"parents": [], "children": audio_chunks}
             chunks = audio_chunks
         else:
-            hier, qdrant_coll, emb_tier = await run_in_threadpool(
+            hier, qdrant_coll, emb_tier, extractor_used = await run_in_threadpool(
                 _ingest_text_like, str(storage_path), doc_id, case_id, doc.filename, suffix, extra_metadata
             )
             chunks = hier["children"]
@@ -343,6 +354,7 @@ async def upload_document(
     doc.status = IngestStatus.done
     doc.qdrant_collection = qdrant_coll
     doc.embedding_tier = emb_tier
+    doc.extractor_used = extractor_used
     if suffix not in _AUDIO_SUFFIXES:
         doc.page_count = len({ch.get("page") for ch in chunks if ch.get("page")})
 
@@ -354,6 +366,7 @@ async def upload_document(
         "status": "done",
         "embedding_tier": emb_tier,
         "qdrant_collection": qdrant_coll,
+        "extractor_used": extractor_used,
     }
 
 
@@ -437,6 +450,7 @@ async def doc_status(
         "chunk_count": len(chunks_result.all()),
         "embedding_tier": doc.embedding_tier,
         "qdrant_collection": doc.qdrant_collection,
+        "extractor_used": doc.extractor_used,
         "error": doc.error_message,
     }
 

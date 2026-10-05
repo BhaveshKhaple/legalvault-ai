@@ -125,6 +125,12 @@ class Document(SQLModel, table=True):
     jurisdiction: Optional[str] = Field(default=None, max_length=100, index=True)
     version_tag: Optional[str] = Field(default=None, max_length=100)
     regulator: Optional[str] = Field(default=None, max_length=100, index=True)
+    # ── UI citation preview: which extractor actually ran ─────────────────────
+    # "docling" when the layout-aware path succeeded; "pymupdf" when Docling
+    # fell back on a scanned/image-only PDF; "whisper" for audio; "text" for
+    # .txt. Surfaced in the UI as a small pill so the user can see which
+    # pipeline parsed each document.
+    extractor_used: str = Field(default="unknown", max_length=20)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
