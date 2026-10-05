@@ -243,6 +243,12 @@ async def run_rag(
             "ts_start": ev.ts_start,
             "section_title": c.get("payload", {}).get("section_title"),
             "embedding_tier": c.get("payload", {}).get("embedding_tier", "e5_small"),
+            # UI citation preview: doc_id lets the frontend build the
+            # /v1/cases/{cid}/documents/{did}/page-image?page=N URL; bbox is
+            # the TOPLEFT [x0,y0,x1,y1] rectangle to overlay on that rendered
+            # page (None when the extractor was PyMuPDF/text/whisper).
+            "doc_id": c.get("payload", {}).get("doc_id"),
+            "bbox": c.get("payload", {}).get("bbox"),
         }
         for i, (c, ev) in enumerate(zip(top_chunks, evidence_chunks))
     ]
