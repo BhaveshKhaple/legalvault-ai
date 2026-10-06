@@ -55,6 +55,37 @@ class TestDoclingExtractor:
         finally:
             os.unlink(path)
 
+    def test_extract_docling_emits_bbox_and_page_size(self):
+        """Phase: UI citation preview. Every item carries a bbox (or None)
+        and every page carries width/height so the overlay layer can scale."""
+        path = _make_text_pdf(
+            ["Section 1. Scope. This clause defines the scope of the contract."]
+        )
+        try:
+            pages = extract_docling(path)
+            assert len(pages) == 1
+            page = pages[0]
+
+            # Page-level: width/height present and positive
+            assert "width" in page and "height" in page
+            assert page["width"] is not None and page["width"] > 0
+            assert page["height"] is not None and page["height"] > 0
+
+            # Item-level: every item has a bbox key; at least one is a 4-tuple
+            # in TOPLEFT origin (y0 < y1, x0 < x1), with coords inside the page
+            assert all("bbox" in item for item in page["items"])
+            bboxes = [item["bbox"] for item in page["items"] if item["bbox"] is not None]
+            assert bboxes, "expected at least one item with a bbox"
+            for bb in bboxes:
+                assert len(bb) == 4
+                x0, y0, x1, y1 = bb
+                assert x0 < x1, f"expected x0<x1, got {bb}"
+                assert y0 < y1, f"expected y0<y1 (TOPLEFT origin), got {bb}"
+                assert 0 <= x0 and x1 <= page["width"] + 1  # +1 for float rounding
+                assert 0 <= y0 and y1 <= page["height"] + 1
+        finally:
+            os.unlink(path)
+
     def test_extract_docling_scanned_raises_runtime_error(self):
         path = _make_image_pdf()
         try:

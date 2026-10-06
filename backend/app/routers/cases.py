@@ -88,6 +88,7 @@ async def get_case(
             "status": d.status,
             "page_count": d.page_count,
             "created_at": d.created_at.isoformat(),
+            "extractor_used": d.extractor_used,
         }
         for d in docs_result.all()
     ]

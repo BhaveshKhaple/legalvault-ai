@@ -64,6 +64,22 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Zऀ-ॿ])|(?<=;)\s+")
 _NUMBERED_CLAUSE = re.compile(r"^(?P<num>\d+\.\d+(?:\.\d+)*\.?|\d+\.)\s+")
 
 
+def _union_bboxes(bboxes: list[list[float]]) -> list[float] | None:
+    """Merge N bboxes into their axis-aligned bounding rectangle.
+
+    Used by the Docling path when several short items are merged into one
+    child chunk — the resulting highlight is one rectangle covering every
+    contributing item. Returns None if the input is empty.
+    """
+    if not bboxes:
+        return None
+    x0 = min(bb[0] for bb in bboxes)
+    y0 = min(bb[1] for bb in bboxes)
+    x1 = max(bb[2] for bb in bboxes)
+    y1 = max(bb[3] for bb in bboxes)
+    return [x0, y0, x1, y1]
+
+
 def _split_long_paragraph(text: str, max_chars: int) -> list[str]:
     """Split a paragraph that exceeds max_chars into sub-chunks on sentence boundaries."""
     text = text.strip()
@@ -94,6 +110,64 @@ def _is_heading_level(label: str) -> int:
 
 def _is_table(label: str) -> bool:
     return label == "table"
+
+
+# ─── Citation fix 3 — table-row atomic chunks ─────────────────────────────────
+# Why: the cross-encoder reranker (MS-MARCO MiniLM) can't tell that
+# "Prepayment charge | 2.00% of principal" is a semantic unit in a Markdown
+# table. It just sees keywords. When a user asks "What is the prepayment
+# charge?" the reranker scores a prose chunk mentioning "prepayment charge"
+# higher than a table row that has the actual value, because the prose chunk
+# is denser in that term.
+#
+# Fix: break every table into one child per DATA ROW, with the table header
+# row prepended. Each row becomes a self-contained semantic unit ("Charge |
+# Amount | Notes" + "Prepayment charge | 2.00% of principal | Applicable..."),
+# and the reranker now sees a complete fact rather than a flat prose match.
+# The whole table still exists as the PARENT, so when the row-child wins
+# retrieval, the LLM still gets the full table for context on parent-swap.
+
+
+def _split_markdown_table_rows(markdown: str) -> list[str] | None:
+    """Split a Docling-exported markdown table into header + data rows.
+
+    Returns a list of ready-to-embed child strings (header prepended to each
+    data row), or None if the input doesn't look like a markdown table.
+
+    Expected input shape (Docling emits something like this):
+
+        | Charge          | Amount          | Notes               |
+        |-----------------|-----------------|---------------------|
+        | Processing fee  | 1.00% of amount | Deducted up-front   |
+        | Prepayment fee  | 2.00% of amount | Part or full prepay |
+
+    Returns:
+        [
+          "| Charge | Amount | Notes |\n| Processing fee | 1.00% of amount | Deducted up-front |",
+          "| Charge | Amount | Notes |\n| Prepayment fee | 2.00% of amount | Part or full prepay |",
+        ]
+    """
+    lines = [ln.strip() for ln in markdown.strip().splitlines() if ln.strip()]
+    # Must have at least header + separator + 1 data row
+    if len(lines) < 3:
+        return None
+
+    # Header row: starts with | and has at least one |
+    if not (lines[0].startswith("|") and lines[0].count("|") >= 2):
+        return None
+
+    # Separator row: contains only dashes, pipes, and whitespace
+    sep = lines[1]
+    sep_chars = set(sep)
+    if not (sep.startswith("|") and sep_chars.issubset(set("|-: "))):
+        return None
+
+    header = lines[0]
+    data_rows = [ln for ln in lines[2:] if ln.startswith("|") and ln.count("|") >= 2]
+    if not data_rows:
+        return None
+
+    return [f"{header}\n{row}" for row in data_rows]
 
 
 def _flush_parent(
@@ -175,7 +249,9 @@ def _chunk_docling_pages(pages: list[dict]) -> dict:
             label = raw.get("heading_level") or raw.get("label") or "body"
             item = {"text": text, "page": page_no}
 
-            # Table — atomic parent + atomic child, flush any pending buffer first
+            # Table — atomic parent (full table) + per-row children. Fix 3:
+            # split markdown rows so the reranker sees "header | row" as a
+            # semantic unit rather than a flat 10-row flat string.
             if _is_table(label):
                 flush()
                 parents.append({
@@ -186,14 +262,27 @@ def _chunk_docling_pages(pages: list[dict]) -> dict:
                     "is_table": True,
                 })
                 parent_idx = len(parents) - 1
-                children.append({
-                    "chunk_role": "child",
-                    "content": text,
-                    "page": page_no,
-                    "section_title": section_title or "Table",
-                    "parent_index": parent_idx,
-                    "is_table": True,
-                })
+                row_chunks = _split_markdown_table_rows(text)
+                if row_chunks:
+                    for row_text in row_chunks:
+                        children.append({
+                            "chunk_role": "child",
+                            "content": row_text,
+                            "page": page_no,
+                            "section_title": section_title or "Table",
+                            "parent_index": parent_idx,
+                            "is_table": True,
+                        })
+                else:
+                    # Not a parseable markdown table — fall back to atomic child
+                    children.append({
+                        "chunk_role": "child",
+                        "content": text,
+                        "page": page_no,
+                        "section_title": section_title or "Table",
+                        "parent_index": parent_idx,
+                        "is_table": True,
+                    })
                 continue
 
             # Heading — start a new section (flush current buffer first)
@@ -244,13 +333,15 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
 
     # Pending merge buffer — body items under CHILD_MERGE_BELOW_CHARS get
     # concatenated until buf length crosses the threshold or we hit a boundary
-    # (heading, table, parent change).
+    # (heading, table, parent change). `pending_bboxes` accumulates every
+    # contributing item's bbox so the emitted child carries the union rect.
     pending_text: str = ""
     pending_page: int | None = None
     pending_parent_idx: int = -1
+    pending_bboxes: list[list[float]] = []
 
     def flush_pending():
-        nonlocal pending_text, pending_page, pending_parent_idx
+        nonlocal pending_text, pending_page, pending_parent_idx, pending_bboxes
         if pending_text.strip() and 0 <= pending_parent_idx < len(parents):
             children.append({
                 "chunk_role": "child",
@@ -259,10 +350,12 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                 "section_title": parents[pending_parent_idx].get("section_title"),
                 "parent_index": pending_parent_idx,
                 "is_table": False,
+                "bbox": _union_bboxes(pending_bboxes),
             })
         pending_text = ""
         pending_page = None
         pending_parent_idx = -1
+        pending_bboxes = []
 
     for page in pages:
         page_no = page.get("page", 1)
@@ -276,12 +369,30 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
             if not text:
                 continue
             label = raw.get("heading_level") or raw.get("label") or "body"
+            item_bbox = raw.get("bbox")
 
-            # Table — atomic child, flush pending prose first
+            # Table — flush pending prose, then emit per-row children.
+            # Citation fix 3: if the table parses as a markdown table, emit
+            # one child per data row with the header prepended. Otherwise
+            # fall back to one atomic child for the whole table.
             if _is_table(label):
                 flush_pending()
                 for idx, p in enumerate(parents):
                     if p.get("is_table") and p["content"] == text:
+                        row_chunks = _split_markdown_table_rows(text)
+                        if row_chunks:
+                            for row_text in row_chunks:
+                                children.append({
+                                    "chunk_role": "child",
+                                    "content": row_text,
+                                    "page": page_no,
+                                    "section_title": p.get("section_title"),
+                                    "parent_index": idx,
+                                    "is_table": True,
+                                    "bbox": item_bbox,
+                                })
+                            break
+                        # Fall-through: no parseable rows, use atomic child
                         children.append({
                             "chunk_role": "child",
                             "content": text,
@@ -289,6 +400,7 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                             "section_title": p.get("section_title"),
                             "parent_index": idx,
                             "is_table": True,
+                            "bbox": item_bbox,
                         })
                         break
                 continue
@@ -314,7 +426,10 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
             if pending_parent_idx != -1 and pending_parent_idx != parent_cursor:
                 flush_pending()
 
-            # Long item → split into normal-sized children, flush pending first
+            # Long item → split into normal-sized children, flush pending first.
+            # Every split piece inherits the whole item's bbox — we can't carve
+            # it up by sentence without char-offset math, and the slight
+            # over-highlight is acceptable for the preview overlay.
             if len(text) > CHILD_MERGE_BELOW_CHARS:
                 flush_pending()
                 for piece in _split_long_paragraph(text, CHILD_MAX_CHARS):
@@ -325,6 +440,7 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                         "section_title": parents[parent_cursor].get("section_title") if parents else None,
                         "parent_index": parent_cursor,
                         "is_table": False,
+                        "bbox": item_bbox,
                     })
                 continue
 
@@ -335,6 +451,12 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
                 pending_text = text
                 pending_page = page_no
                 pending_parent_idx = parent_cursor
+
+            # Only union bboxes from items on the same page as the buffer's
+            # declared `page_no` — a mixed-page union would be meaningless
+            # for a single-page overlay.
+            if item_bbox is not None and page_no == pending_page:
+                pending_bboxes.append(item_bbox)
 
             if len(pending_text) >= CHILD_TARGET_CHARS:
                 flush_pending()
@@ -422,6 +544,7 @@ def _chunk_fallback_pages(pages: list[dict]) -> dict:
                 "section_title": ch.get("section_title"),
                 "parent_index": parent_cursor,
                 "is_table": False,
+                "bbox": None,  # non-Docling extractors don't carry bbox info
             })
 
     return {"parents": parents, "children": children}
