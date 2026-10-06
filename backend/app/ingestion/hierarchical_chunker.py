@@ -112,6 +112,64 @@ def _is_table(label: str) -> bool:
     return label == "table"
 
 
+# ─── Citation fix 3 — table-row atomic chunks ─────────────────────────────────
+# Why: the cross-encoder reranker (MS-MARCO MiniLM) can't tell that
+# "Prepayment charge | 2.00% of principal" is a semantic unit in a Markdown
+# table. It just sees keywords. When a user asks "What is the prepayment
+# charge?" the reranker scores a prose chunk mentioning "prepayment charge"
+# higher than a table row that has the actual value, because the prose chunk
+# is denser in that term.
+#
+# Fix: break every table into one child per DATA ROW, with the table header
+# row prepended. Each row becomes a self-contained semantic unit ("Charge |
+# Amount | Notes" + "Prepayment charge | 2.00% of principal | Applicable..."),
+# and the reranker now sees a complete fact rather than a flat prose match.
+# The whole table still exists as the PARENT, so when the row-child wins
+# retrieval, the LLM still gets the full table for context on parent-swap.
+
+
+def _split_markdown_table_rows(markdown: str) -> list[str] | None:
+    """Split a Docling-exported markdown table into header + data rows.
+
+    Returns a list of ready-to-embed child strings (header prepended to each
+    data row), or None if the input doesn't look like a markdown table.
+
+    Expected input shape (Docling emits something like this):
+
+        | Charge          | Amount          | Notes               |
+        |-----------------|-----------------|---------------------|
+        | Processing fee  | 1.00% of amount | Deducted up-front   |
+        | Prepayment fee  | 2.00% of amount | Part or full prepay |
+
+    Returns:
+        [
+          "| Charge | Amount | Notes |\n| Processing fee | 1.00% of amount | Deducted up-front |",
+          "| Charge | Amount | Notes |\n| Prepayment fee | 2.00% of amount | Part or full prepay |",
+        ]
+    """
+    lines = [ln.strip() for ln in markdown.strip().splitlines() if ln.strip()]
+    # Must have at least header + separator + 1 data row
+    if len(lines) < 3:
+        return None
+
+    # Header row: starts with | and has at least one |
+    if not (lines[0].startswith("|") and lines[0].count("|") >= 2):
+        return None
+
+    # Separator row: contains only dashes, pipes, and whitespace
+    sep = lines[1]
+    sep_chars = set(sep)
+    if not (sep.startswith("|") and sep_chars.issubset(set("|-: "))):
+        return None
+
+    header = lines[0]
+    data_rows = [ln for ln in lines[2:] if ln.startswith("|") and ln.count("|") >= 2]
+    if not data_rows:
+        return None
+
+    return [f"{header}\n{row}" for row in data_rows]
+
+
 def _flush_parent(
     parents: list[dict],
     buf: list[dict],
@@ -191,7 +249,9 @@ def _chunk_docling_pages(pages: list[dict]) -> dict:
             label = raw.get("heading_level") or raw.get("label") or "body"
             item = {"text": text, "page": page_no}
 
-            # Table — atomic parent + atomic child, flush any pending buffer first
+            # Table — atomic parent (full table) + per-row children. Fix 3:
+            # split markdown rows so the reranker sees "header | row" as a
+            # semantic unit rather than a flat 10-row flat string.
             if _is_table(label):
                 flush()
                 parents.append({
@@ -202,14 +262,27 @@ def _chunk_docling_pages(pages: list[dict]) -> dict:
                     "is_table": True,
                 })
                 parent_idx = len(parents) - 1
-                children.append({
-                    "chunk_role": "child",
-                    "content": text,
-                    "page": page_no,
-                    "section_title": section_title or "Table",
-                    "parent_index": parent_idx,
-                    "is_table": True,
-                })
+                row_chunks = _split_markdown_table_rows(text)
+                if row_chunks:
+                    for row_text in row_chunks:
+                        children.append({
+                            "chunk_role": "child",
+                            "content": row_text,
+                            "page": page_no,
+                            "section_title": section_title or "Table",
+                            "parent_index": parent_idx,
+                            "is_table": True,
+                        })
+                else:
+                    # Not a parseable markdown table — fall back to atomic child
+                    children.append({
+                        "chunk_role": "child",
+                        "content": text,
+                        "page": page_no,
+                        "section_title": section_title or "Table",
+                        "parent_index": parent_idx,
+                        "is_table": True,
+                    })
                 continue
 
             # Heading — start a new section (flush current buffer first)
@@ -298,11 +371,28 @@ def _emit_children_for_docling(pages: list[dict], parents: list[dict]) -> dict:
             label = raw.get("heading_level") or raw.get("label") or "body"
             item_bbox = raw.get("bbox")
 
-            # Table — atomic child, flush pending prose first
+            # Table — flush pending prose, then emit per-row children.
+            # Citation fix 3: if the table parses as a markdown table, emit
+            # one child per data row with the header prepended. Otherwise
+            # fall back to one atomic child for the whole table.
             if _is_table(label):
                 flush_pending()
                 for idx, p in enumerate(parents):
                     if p.get("is_table") and p["content"] == text:
+                        row_chunks = _split_markdown_table_rows(text)
+                        if row_chunks:
+                            for row_text in row_chunks:
+                                children.append({
+                                    "chunk_role": "child",
+                                    "content": row_text,
+                                    "page": page_no,
+                                    "section_title": p.get("section_title"),
+                                    "parent_index": idx,
+                                    "is_table": True,
+                                    "bbox": item_bbox,
+                                })
+                            break
+                        # Fall-through: no parseable rows, use atomic child
                         children.append({
                             "chunk_role": "child",
                             "content": text,

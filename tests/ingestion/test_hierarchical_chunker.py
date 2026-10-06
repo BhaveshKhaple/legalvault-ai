@@ -90,21 +90,66 @@ class TestDoclingHierarchy:
         assert "cloud" in joined and "No, everything runs locally" in joined
         assert "hardware" in joined and "8 GB RAM" in joined
 
-    def test_table_becomes_atomic_parent_and_child(self):
+    def test_table_without_md_separator_falls_back_to_atomic(self):
+        # No `|---|---|` row → not a parseable markdown table → single atomic child
         pages = [_docling_page([
             ("H1", "Fees"),
             ("body", "The fees are as follows."),
             ("table", "Service | Amount\nSetup | 10000\nMonthly | 5000"),
         ])]
         r = chunk_hierarchical(pages)
-        # Table parents are marked is_table=True
         table_parents = [p for p in r["parents"] if p["is_table"]]
         table_children = [c for c in r["children"] if c["is_table"]]
         assert len(table_parents) == 1
-        assert len(table_children) == 1
-        # Table child's content equals table parent's content (atomic)
+        assert len(table_children) == 1   # fallback atomic path
         assert table_children[0]["content"] == table_parents[0]["content"]
         assert "Setup | 10000" in table_children[0]["content"]
+
+    def test_markdown_table_splits_into_per_row_children(self):
+        """Citation fix 3 — the fee table that failed on real data.
+
+        When Docling exports a table as proper markdown, the chunker emits
+        one child per data row with the header prepended. This makes the
+        reranker see each row as a complete semantic unit instead of hunting
+        for a term in a flat 10-row concatenation.
+        """
+        md_table = (
+            "| Charge          | Amount                 | Notes                  |\n"
+            "|-----------------|------------------------|------------------------|\n"
+            "| Processing fee  | 1.00% of amount        | Deducted up-front      |\n"
+            "| Prepayment fee  | 2.00% of principal     | Part or full prepay    |\n"
+            "| Penal charges   | 2.00% per month        | On overdue amount      |"
+        )
+        pages = [_docling_page([
+            ("H1", "6. FEES AND CHARGES"),
+            ("table", md_table),
+        ])]
+        r = chunk_hierarchical(pages)
+
+        table_parents = [p for p in r["parents"] if p["is_table"]]
+        table_children = [c for c in r["children"] if c["is_table"]]
+
+        # Still ONE parent (the whole table — stays available for LLM context)
+        assert len(table_parents) == 1
+        # Three data rows → three children
+        assert len(table_children) == 3
+        # Each child has the header prepended + its own row
+        for child in table_children:
+            assert "| Charge" in child["content"]
+            assert "| Amount" in child["content"]
+            # And exactly one data row's "Notes" column marker
+            lines = [ln for ln in child["content"].splitlines() if ln.strip()]
+            assert len(lines) == 2  # header + one data row
+
+        # The specific row that fixed the real "prepayment charge" bug
+        prepayment_row = next(
+            (c for c in table_children if "Prepayment fee" in c["content"]),
+            None,
+        )
+        assert prepayment_row is not None
+        assert "2.00% of principal" in prepayment_row["content"]
+        # Rank-5 chunk no longer at risk — now the reranker sees "Prepayment fee |
+        # 2.00% of principal" as its own atomic unit, not buried in a 10-row dump.
 
     def test_long_paragraph_splits_into_multiple_children_same_parent(self):
         # One paragraph bigger than CHILD_MAX_CHARS so it must be sentence-split.

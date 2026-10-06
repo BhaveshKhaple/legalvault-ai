@@ -227,7 +227,14 @@ async def run_rag(
         ))
 
     prompt = build_citation_prompt(question, evidence_chunks)
-    answer = generate(prompt, model=tier.llm)
+    raw_answer = generate(prompt, model=tier.llm)
+
+    # Citation fix 1 — substitute the LLM's [#N] index tags with real source
+    # labels using the evidence array. This fixes the "wrong page cited" bug
+    # where the LLM would quote a fact from one chunk but tag it with the
+    # higher-ranked chunk's source. See citation_prompt.substitute_citations.
+    from backend.app.llm.prompts.citation_prompt import substitute_citations
+    answer, cited_indices = substitute_citations(raw_answer, evidence_chunks)
 
     # ── 7. Format response ───────────────────────────────────────────────────
     def _norm(x):
@@ -236,6 +243,12 @@ async def run_rag(
     evidence_out = [
         {
             "rank": i + 1,
+            # 1-indexed match for the UI — chip label and the [#N] in the answer
+            "cite_index": i + 1,
+            # True iff this specific chunk appeared in the LLM's citations.
+            # Lets the UI render cited chips with a bold border and non-cited
+            # chips as secondary matches.
+            "cited": (i + 1) in cited_indices,
             "score": _norm(c.get("rerank_score", c.get("score", 0))),
             "content": ev.content,
             "filename": ev.filename,
@@ -256,9 +269,24 @@ async def run_rag(
     raw = float(top_chunks[0].get("rerank_score", top_chunks[0].get("score", 0)))
     confidence = 1.0 / (1.0 + math.exp(-raw))
 
+    # Citation fix 2 — bucket the sigmoid confidence so the UI can decide
+    # whether to show a warning banner.
+    if confidence >= 0.5:
+        confidence_band = "high"
+    elif confidence >= 0.25:
+        confidence_band = "medium"
+    elif confidence >= 0.10:
+        confidence_band = "low"
+    else:
+        confidence_band = "at_risk"
+
     return {
         "answer": answer,
         "evidence": evidence_out,
         "confidence": round(confidence, 4),
+        "confidence_band": confidence_band,
+        # Which 1-based evidence indices the LLM actually cited (useful for
+        # the UI to pre-select the cited chunk and for the audit log).
+        "cited_indices": sorted(cited_indices),
         "latency_ms": int((time.perf_counter() - t0) * 1000),
     }
