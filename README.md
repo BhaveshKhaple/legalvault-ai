@@ -88,17 +88,22 @@ cd legalvault-ai
 # 2. Copy env template and fill values
 cp .env.example .env
 
-# 3. Boot the stack
+# 3. Install Dependencies
+python3 -m venv .venv
+source .venv/bin/activate.fish # to activate venv in linux with fish terminal
+python3 -m pip install -r requirements.txt
+
+# 4. Boot the stack
 docker compose up -d postgres redis
 cd backend && pip install -r requirements.txt
 
-# 4. Run migrations
+# 5. Run migrations
 alembic upgrade head
 
-# 5. Start   dev server
+# 6. Start   dev server
 uvicorn app:app --reload --port 8000
 
-# 6. Open UI
+# 7. Open UI
 open http://localhost:8000
 ```
 
